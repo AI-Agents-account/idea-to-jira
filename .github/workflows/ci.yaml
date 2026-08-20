@@ -26,6 +26,20 @@ jobs:
         run: npm run check
       - name: Build plugin
         run: npm run build
+      - name: Verify create readiness is fail-closed
+        run: npm run verify:create-disabled
+      - name: Validate OpenClaw configuration
+        env:
+          HOME: ${{ runner.temp }}/idea-to-jira-openclaw-validation
+          OPENCLAW_CONFIG_PATH: ${{ github.workspace }}/config/openclaw.json5
+          IDEA_TO_JIRA_PLUGIN_PATH: ${{ github.workspace }}/packages/idea-to-jira-plugin
+          OPENCLAW_GATEWAY_TOKEN: ci-placeholder-gateway-token
+          TELEGRAM_BOT_TOKEN: ci-placeholder-telegram-token
+          JIRA_BASE_URL: https://jira.example.test
+          JIRA_TOKEN: ci-placeholder-jira-token
+          BUSINESS_ADMIN_TELEGRAM_IDS: "123456789"
+          PRODUCT_OWNER_TELEGRAM_IDS: "987654321"
+        run: npm exec -- openclaw config validate
       - name: Validate Compose rendering
         run: docker compose --env-file .env.example config --quiet
 

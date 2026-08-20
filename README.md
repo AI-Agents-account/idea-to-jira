@@ -9,9 +9,11 @@
 - корневой npm workspace и пакет плагина `@idea-to-jira/openclaw-plugin`;
 - typed tool `idea_to_jira_validate_draft`, который принимает `summary`, `problem`, `desiredOutcome`, необязательные `evidence` и `labels`;
 - проверка обязательных строк, обрезка пробелов, дедупликация списков и детерминированная сборка Draft для `Feature`;
-- проверка конфигурации плагина: ключ проекта и необязательный путь к каталогу;
-- fail-closed адаптер Jira: любой вызов `createIssue` завершается ошибкой `Jira writes are disabled in the scaffold`;
-- unit-тесты Draft service, TypeScript type-check, JSON validator и CI;
+- единая startup-валидация runtime-конфигурации: Telegram account/channel, фиксированный Jira scope, protected env refs, Catalog schema/checksum, allowlist, STT, rate/retention limits и runtime paths;
+- fail-closed `before_agent_run` gate и tool-factory gate по trusted OpenClaw context: только user-triggered Telegram DM, agent/account `idea-mvp`, numeric sender и destination, равный sender;
+- process-local token-bucket interface, payload limit и санитаризированные audit codes без пользовательского текста, destinations и credentials;
+- явный create-disabled readiness signal и `DisabledJiraIssueClient`: Jira write остаётся недоступен;
+- unit/security/config/deployment-тесты, TypeScript type-check, JSON/OpenClaw validators и CI;
 - Dockerfile и Compose-каркас выделенного OpenClaw Gateway/CLI с постоянными томами и ограничениями контейнера;
 - OpenClaw-конфигурация с отдельным агентом, Telegram DM, peer-scoped сессиями и allowlist из единственного реализованного plugin tool;
 - заготовка Knowledge Catalog, намеренно неполная и не пригодная для production-маршрутизации.
@@ -104,10 +106,10 @@ cp .env.example .env
 | `TELEGRAM_BOT_TOKEN` | Token отдельного бота от BotFather. |
 | `JIRA_BASE_URL` | HTTPS origin целевой Jira без публикации внутреннего адреса в документации. |
 | `JIRA_TOKEN` | Runtime credential Jira с минимальными правами. Сейчас plugin его не использует, потому что Jira write отключён, но Compose требует непустое значение. |
-| `JIRA_PROJECT_KEY` | Фиксированный ключ проекта; по решениям проекта — `FPF`. Сейчас передаётся в контейнер, а plugin config дополнительно закрепляет тот же ключ server-side. |
-| `JIRA_ISSUE_TYPE_ID` | Фиксированный ID типа `Feature`; текущий контракт — `11500`. До реализации mapper переменная не используется для POST. |
-| `BUSINESS_ADMIN_TELEGRAM_IDS` | Разделённые запятыми numeric sender IDs доверенных администраторов. Передаётся в контейнер, но RBAC пока не реализован. |
-| `KNOWLEDGE_CATALOG_PATH` | Контейнерный путь к каталогу; стандартно `/home/node/.openclaw/workspace/knowledge/catalog.md`. Сейчас plugin config закрепляет этот же путь. |
+| `BUSINESS_ADMIN_TELEGRAM_IDS` | Разделённые запятыми numeric sender IDs доверенных администраторов. Startup требует корректный непустой allowlist; RBAC пока не реализован. |
+| `PRODUCT_OWNER_TELEGRAM_IDS` | Server-side allowlist numeric Telegram destinations для будущих PO notifications; startup проверяет формат и непустое значение. |
+
+Jira project/type (`FPF`/`18100`, `Feature`/`11500`), Catalog path/checksum и `writeMode: "disabled"` закреплены server-side в plugin config и не имеют environment override.
 
 Сгенерировать Gateway token можно локально одним из способов:
 
@@ -126,7 +128,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 Создайте постоянные runtime-каталоги до первого запуска:
 
 ```bash
-mkdir -p data/state data/workspace data/auth-profile-secrets
+mkdir -p data/state data/workspace data/plugin-state data/auth-profile-secrets
 ```
 
 `data/state` хранит OpenClaw state и auth profiles, а `data/auth-profile-secrets` — локальный encryption key для OAuth-токенов. Для восстановления OAuth нужны оба каталога; не переносите только один из них и не добавляйте их содержимое в Git.
@@ -206,7 +208,7 @@ docker compose up -d openclaw-gateway
 docker compose ps
 ```
 
-Gateway публикуется только на loopback: `127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}`. Root filesystem контейнера read-only, Linux capabilities сброшены, включён `no-new-privileges`; постоянные данные находятся в `./data/state`, `./data/workspace` и каталоге `OPENCLAW_AUTH_PROFILE_SECRET_DIR`.
+Gateway публикуется только на loopback: `127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}`. Root filesystem контейнера read-only, Linux capabilities сброшены, включён `no-new-privileges`; постоянные данные находятся в `./data/state`, `./data/workspace`, `./data/plugin-state` и каталоге `OPENCLAW_AUTH_PROFILE_SECRET_DIR`.
 
 ### 5. Посмотреть логи и health
 
@@ -215,6 +217,8 @@ docker compose logs --tail=100 openclaw-gateway
 docker compose ps
 docker compose exec openclaw-gateway node /app/scripts/healthcheck.mjs
 curl --fail --silent --show-error http://127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}/healthz
+# Ожидаемо non-zero, пока Jira write закрыт:
+docker compose exec openclaw-gateway node /app/scripts/create-readiness.mjs
 ```
 
 Для непрерывного просмотра логов:
@@ -223,7 +227,7 @@ curl --fail --silent --show-error http://127.0.0.1:${OPENCLAW_GATEWAY_PORT:-1878
 docker compose logs --follow --tail=100 openclaw-gateway
 ```
 
-Healthcheck подтверждает только доступность HTTP endpoint Gateway. Он не доказывает готовность Telegram, модели, Knowledge Catalog, RBAC, Jira, уведомлений или end-to-end сценария.
+Healthcheck подтверждает только liveness HTTP endpoint Gateway. Отдельный `create-readiness.mjs` намеренно возвращает `CREATE_DISABLED` и non-zero до реализации всех create preconditions; liveness не подменяет create-readiness.
 
 ## Безопасность и граница запуска
 

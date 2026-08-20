@@ -12,7 +12,7 @@ Idea-to-Jira — выделенный Telegram-ассистент, которы�
 
 Система строится как один выделенный OpenClaw Gateway с одним агентом и mixed plugin `idea-to-jira`. Отдельный прикладной backend не предполагается: детерминированная бизнес-логика, RBAC, состояние Draft, интеграция с Jira и аудит принадлежат плагину, а OpenClaw ведёт диалог, вызывает только разрешённые typed tools и управляет model/channel runtime.
 
-> Текущий репозиторий — production-oriented scaffold, а не готовый MVP. Реализованы typed validation Draft и fail-closed Jira adapter; RBAC, SQLite, поиск дублей, Jira POST, reconciliation и уведомления пока описаны как целевой контракт.
+> Текущий репозиторий — production-oriented scaffold, а не готовый MVP. Реализованы stage-01 runtime/config/security foundation, typed validation Draft и fail-closed Jira adapter; RBAC, SQLite, поиск дублей, Jira POST, reconciliation и уведомления пока описаны как целевой контракт.
 
 ## 2. Архитектурные принципы
 
@@ -29,14 +29,16 @@ Idea-to-Jira — выделенный Telegram-ассистент, которы�
 
 | Область | Реализовано в scaffold | Целевой MVP |
 | --- | --- | --- |
-| OpenClaw plugin | Регистрация typed tool и проверка config | Полный набор узких server-side tools и lifecycle hooks |
+| OpenClaw plugin | Единая startup config validation, `before_agent_run` и tool-context gates, один typed tool | Полный набор узких server-side tools и lifecycle hooks |
 | Draft | Нормализация и валидация полей `Feature` в памяти | Версионированный Draft, CAS, диалог, readiness и retention в SQLite |
 | Jira | Fail-closed adapter: write всегда запрещён | Bounded duplicate search, whitelist mapper, POST и manual reconciliation |
-| Доступ | Не реализован | Guest/Creator/Business Admin с атомарными grant/revoke |
+| Доступ | Channel/account/agent/user-trigger/DM/destination fail-closed gate; RBAC ещё не реализован | Guest/Creator/Business Admin с атомарными grant/revoke |
 | Knowledge Catalog | Неполная Markdown-заготовка | Версионированный, проверяемый и fail-closed каталог маршрутизации |
 | Voice | Не реализован | Локальный Whisper `medium`, показ и коррекция транскрипта |
 | Уведомления | Не реализованы | Идемпотентная доставка автору, Business Admin и Product Owner |
-| Наблюдаемость | Контейнерный healthcheck | Structured logs, metrics, alerts, audit export и runbooks |
+| Наблюдаемость | Раздельные liveness/create-readiness signals и санитаризированные security audit codes | Structured logs, metrics, alerts, audit export и runbooks |
+
+Подтверждённый контракт закреплённой версии OpenClaw `2026.7.1-2`: `before_agent_run` передаёт host-derived `accountId`, `channelId`, `senderId`, а hook context — `agentId`, `trigger` и `chatId`; tool factory получает `agentId`, `messageChannel`, `agentAccountId`, `requesterSenderId` и `deliveryContext`. Параметры tool и текст модели не являются источником identity. Отсутствие любого обязательного поля, non-user trigger, thread/group route или несовпадение DM destination с sender приводит к отказу; эти варианты закреплены unit-тестами.
 
 ## 4. Контекст системы
 
@@ -536,21 +538,21 @@ idea-to-jira/
 ├── packages/
 │   └── idea-to-jira-plugin/
 │       ├── src/
-│       │   ├── index.ts            # регистрация OpenClaw plugin/tool
-│       │   ├── config.ts           # проверка jiraProjectKey/catalogPath
+│       │   ├── index.ts            # plugin, typed input hook и context-gated tool
+│       │   ├── config.ts           # единый immutable effective config + startup validation
+│       │   ├── runtime/            # requester context, policy/rate limit, private state root
 │       │   ├── domain/idea.ts      # текущие TypeScript-типы Draft
 │       │   ├── workflow/
 │       │   │   └── draft-service.ts # нормализация и typed validation
 │       │   ├── catalog/catalog.ts  # чтение Markdown без trusted parsing
 │       │   └── jira/client.ts      # DisabledJiraIssueClient
-│       ├── tests/
-│       │   └── draft-service.test.ts
+│       ├── tests/                  # config, security policy, deployment и Draft tests
 │       ├── package.json
 │       └── openclaw.plugin.json    # manifest и schema config
 ├── config/openclaw.json5           # agent/channel/tool/plugin config
 ├── knowledge/catalog.md            # неполная заготовка Catalog
 ├── docs/                           # требования, решения, Jira contract
-├── scripts/                        # validation/preflight/healthcheck
+├── scripts/                        # validation/preflight/liveness/create-readiness
 ├── Dockerfile                      # сборка plugin + OpenClaw image
 └── compose.yaml                    # Gateway/CLI, volumes и hardening
 ```

@@ -17,6 +17,22 @@ if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number
 fi
 
 npm run validate:json
+npm run check
+npm run build
+npm run verify:create-disabled
+
+validation_home="${TMPDIR:-/tmp}/idea-to-jira-openclaw-validation-2026.7.1-2"
+mkdir -p "$validation_home"
+HOME="$validation_home" \
+OPENCLAW_CONFIG_PATH="$PWD/config/openclaw.json5" \
+IDEA_TO_JIRA_PLUGIN_PATH="$PWD/packages/idea-to-jira-plugin" \
+OPENCLAW_GATEWAY_TOKEN="preflight-placeholder-gateway-token" \
+TELEGRAM_BOT_TOKEN="preflight-placeholder-telegram-token" \
+JIRA_BASE_URL="https://jira.example.test" \
+JIRA_TOKEN="preflight-placeholder-jira-token" \
+BUSINESS_ADMIN_TELEGRAM_IDS="123456789" \
+PRODUCT_OWNER_TELEGRAM_IDS="987654321" \
+npm exec -- openclaw config validate
 
 if [ ! -f .env ]; then
   echo "warning: .env is missing; validating Compose with placeholders from .env.example" >&2
