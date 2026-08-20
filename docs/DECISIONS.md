@@ -45,6 +45,8 @@
 | D-021 | Assignee/reporter omitted; assignee остаётся unassigned | ACCEPTED |
 | D-022 | Plugin не выполняет Jira workflow transition | ACCEPTED |
 | D-023 | OpenClaw-only без отдельного application backend | ACCEPTED |
+| D-024 | SQLite driver — встроенный `node:sqlite` закреплённого Node 24 | ACCEPTED |
+| D-025 | Schema v1 использует FR-enums `EDITING` и `PENDING` | ACCEPTED |
 
 ## 3. Подробные записи
 
@@ -303,6 +305,32 @@
 **Решение:** отдельный application backend не создаётся; security-sensitive behavior реализуется custom mixed plugin.
 
 **Следствия:** skill/prompt отвечает за диалоговую методику, но RBAC, DB, Jira client, operation claim, hooks и notifications реализуются кодом plugin.
+
+### D-024 — SQLite driver для Node 24
+
+**Статус:** ACCEPTED
+**Решение:** plugin использует встроенный модуль `node:sqlite` из закреплённого Node `24.19.0` и синхронный `DatabaseSync` только внутри коротких локальных транзакций.
+
+**Основание:** фактический runtime предоставляет `DatabaseSync`, prepared statements, bounded `timeout`, backup API и defensive mode. В сравнении с `better-sqlite3`/`sqlite3` встроенный модуль не добавляет npm supply-chain dependency, native addon, postinstall или отдельную ABI/build matrix. Текущий runtime и CI закреплены на Node 24; переход на другую major-версию требует повторной проверки API и durability tests.
+
+**Следствия:**
+
+- SQL выполняется только через migration registry или параметризованные prepared statements;
+- длительные network/model/STT операции не выполняются внутри SQLite transaction;
+- package/lock не получают новый SQLite dependency;
+- container и CI обязаны исполнять ту же Node 24 storage suite.
+
+### D-025 — Канонические persistent enums schema v1
+
+**Статус:** ACCEPTED
+**Решение:** schema v1 закрепляет нормативные состояния FR-101—FR-103: Draft начинается с `EDITING`, posting operation — с `PENDING`. Значения `DRAFTING` и `CLAIMED` не являются альтернативными persistent states.
+
+**Следствия:**
+
+- voice review хранится в отдельном transcript/substate профильного этапа, а не меняет Draft enum;
+- успешный unique insert операции в `PENDING` является atomic claim; факт начала сети отражается переходом в `POSTING` и `network_started_at`;
+- migration contract tests отклоняют `DRAFTING` и `CLAIMED`;
+- изменение этих enum после публикации schema v1 требует новой migration и versioned contract review.
 
 ## 4. Явно отменённые положения исходного ТЗ
 

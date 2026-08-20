@@ -42,6 +42,20 @@ jobs:
         run: npm exec -- openclaw config validate
       - name: Validate Compose rendering
         run: docker compose --env-file .env.example config --quiet
+      - name: Build target container
+        run: docker compose --env-file .env.example build openclaw-gateway
+      - name: Verify SQLite durability and mount permissions in target container
+        shell: bash
+        run: |
+          image="idea-to-jira-openclaw:2026.7.1-2"
+          runtime_uid="$(docker run --rm --entrypoint id "$image" -u)"
+          runtime_gid="$(docker run --rm --entrypoint id "$image" -g)"
+          sudo chown -R "$runtime_uid:$runtime_gid" data/plugin-state
+          sudo chmod 0700 data/plugin-state
+          docker run --rm --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+            --mount type=bind,src="$PWD/data/plugin-state",dst=/home/node/.openclaw/plugin-state \
+            --entrypoint node "$image" /app/scripts/storage-container-check.mjs
 
   secret-scan:
     runs-on: ubuntu-latest

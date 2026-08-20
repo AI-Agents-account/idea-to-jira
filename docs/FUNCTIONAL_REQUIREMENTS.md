@@ -307,8 +307,10 @@ READY должен проверяться внутри той же транза�
 - draft ID/version;
 - payload hash;
 - локальным unique idempotency key;
-- состоянием `POSTING`;
-- attempt count и timestamps.
+- состоянием `PENDING`;
+- `attempt_count = 0`, creation/update timestamps и пустыми network timestamps.
+
+Непосредственно перед первым network attempt та же server-side процедура должна атомарно перейти в `POSTING`, увеличить attempt count и сохранить `network_started_at`/`last_attempt_at`. Это D-025 no-network boundary; local claim не является доказательством вызова Jira.
 
 ### FR-073. Локальная идемпотентность
 

@@ -41,6 +41,20 @@ test("Compose maps only protected runtime values and keeps Gateway loopback-only
   assert.match(compose, /\.\/data\/plugin-state:\/home\/node\/\.openclaw\/plugin-state/);
 });
 
+test("target-container storage verification is wired into the image and CI", async () => {
+  const dockerfile = await text("Dockerfile");
+  const workflow = await text(".github/workflows/ci.yaml");
+  const storageCheck = await text("scripts/storage-container-check.mjs");
+  assert.match(dockerfile, /^ARG OPENCLAW_VERSION=2026\.7\.1-2\s+FROM node:/);
+  assert.match(dockerfile, /scripts\/storage-container-check\.mjs/);
+  assert.match(workflow, /Verify SQLite durability and mount permissions in target container/);
+  assert.match(workflow, /docker run --rm --read-only/);
+  assert.match(workflow, /storage-container-check\.mjs/);
+  assert.doesNotMatch(workflow, /compose[^\n]*run[^\n]*--no-deps/);
+  assert.match(storageCheck, /openPluginDatabase/);
+  assert.match(storageCheck, /schema=1 journal=wal modes=private restart=ok/);
+});
+
 test("health and create-readiness are separate signals", async () => {
   const compose = await text("compose.yaml");
   const packageJson = JSON.parse(await text("package.json"));

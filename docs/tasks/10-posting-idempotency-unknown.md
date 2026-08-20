@@ -102,7 +102,7 @@ BR-004/012; FR-036, FR-060—086, FR-102—104; NFR-012/030—038/053/070—075/
 
 ## Риски, неизвестные и решения
 
-- **Decision needed:** canonical `PENDING/CLAIMED` naming before schema; semantics must preserve no-network boundary.
+- **Decision closed by D-025:** atomic local claim persists as `PENDING`; the network boundary is the checked transition to `POSTING` with attempt count and timestamps.
 - **Risk:** HTTP library cannot prove not-sent for many failures; classify UNKNOWN by default.
 - **Assumption:** equivalent-content block at least exact tuple; broader dedupe policy must not allow bypass by no-op edits.
 - **Blocker:** production POST remains disabled until stages 11–12 and audit/reconciliation gates pass.

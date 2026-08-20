@@ -376,16 +376,13 @@ Admin-side переходы проверяют host-derived sender ID админ
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DRAFTING
-    DRAFTING --> TRANSCRIPT_REVIEW: получен voice transcript
-    TRANSCRIPT_REVIEW --> DRAFTING: исправлено или принято
-    DRAFTING --> DRAFTING: update / correction / new version
-    DRAFTING --> DUPLICATE_CHECK: поля, Creator и Catalog валидны
-    DUPLICATE_CHECK --> DRAFTING: ошибка или нужны уточнения
-    DUPLICATE_CHECK --> DUPLICATE_LINKED: выбран существующий issue
-    DUPLICATE_CHECK --> READY: NOT_DUPLICATE или NO_CANDIDATES
-    READY --> DRAFTING: content changed / role revoked / Catalog invalidated
-    READY --> POSTING: atomic operation claim
+    [*] --> EDITING
+    EDITING --> EDITING: update / transcript review / new version
+    EDITING --> EDITING: duplicate check error or clarification
+    EDITING --> DUPLICATE_LINKED: выбран существующий issue
+    EDITING --> READY: NOT_DUPLICATE или NO_CANDIDATES
+    READY --> EDITING: content changed / role revoked / Catalog invalidated
+    READY --> POSTING: atomic PENDING operation claim
     POSTING --> CREATED: confirmed Jira key
     POSTING --> FAILED_FINAL: proven final failure
     POSTING --> UNKNOWN: ambiguous network outcome or unsafe recovery
@@ -393,18 +390,18 @@ stateDiagram-v2
     UNKNOWN --> UNKNOWN: reconciliation не дала однозначного доказательства
     DUPLICATE_LINKED --> [*]
     CREATED --> [*]
-    FAILED_FINAL --> DRAFTING: explicit corrected new-version path
+    FAILED_FINAL --> EDITING: explicit corrected new-version path
 ```
 
-`READY` — вычисляемое и перепроверяемое состояние, а не доверенная команда модели. Любое изменение Draft создаёт новую версию и инвалидирует результаты, привязанные к прежней версии. Завершённая или `UNKNOWN` operation сохраняется и продолжает блокировать повтор своего payload.
+`EDITING` — каноническое persistent состояние schema v1. Voice transcript review и duplicate-check execution являются отдельными records/substates профильных компонентов, а не альтернативными состояниями Draft. `READY` — вычисляемое и перепроверяемое состояние, а не доверенная команда модели. Любое изменение Draft создаёт новую версию и инвалидирует результаты, привязанные к прежней версии. Завершённая или `UNKNOWN` operation сохраняется и продолжает блокировать повтор своего payload.
 
 ### 8.3. Posting operation
 
 ```mermaid
 stateDiagram-v2
-    [*] --> CLAIMED: atomic unique claim
-    CLAIMED --> POSTING: сеть будет использована
-    CLAIMED --> FAILED_FINAL: безопасная отмена до сети
+    [*] --> PENDING: atomic unique claim
+    PENDING --> POSTING: сеть будет использована
+    PENDING --> FAILED_FINAL: безопасная отмена до сети
     POSTING --> CREATED: валидный response с Jira key
     POSTING --> FAILED_FINAL: доказанный конечный отказ
     POSTING --> UNKNOWN: POST мог быть принят
@@ -416,7 +413,7 @@ stateDiagram-v2
 
 | Состояние | Значение | Разрешённый следующий шаг |
 | --- | --- | --- |
-| `CLAIMED` | Уникальная операция создана, сеть ещё не использовалась | Начать POST или безопасно отменить до сети |
+| `PENDING` | Уникальная операция создана, сеть ещё не использовалась | Начать POST или безопасно отменить до сети |
 | `POSTING` | Jira request отправляется/мог быть отправлен | Зафиксировать доказанный результат либо `UNKNOWN` |
 | `CREATED` | Получен и проверен Jira key | Только уведомления и аудит |
 | `FAILED_FINAL` | Доказано, что текущая операция не создала issue и не подлежит auto retry | Исправить Draft и создать новую version/operation по правилам |

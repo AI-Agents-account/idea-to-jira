@@ -42,7 +42,7 @@
 | Акторы и permissions | Guest/Creator/Business Admin/PO/Technical Owner/Catalog Owner; host-derived sender ID; server-side checks | RBAC и requester-context handlers отсутствуют; account открыт для DM, allowlist содержит только draft validator | Специфицировано; нужна реализация | **Блокер POST:** этапы 1, 3, 4 |
 | Access states | `GUEST/PENDING/CREATOR/SUSPENDED/BLOCKED`, атомарные решения и anti-replay | Таблиц, handlers и тестов нет | Специфицировано | Этап 4 |
 | Draft states/versioning | Версионный Draft, CAS, provenance, invalidation, READY | В памяти собирается сокращённый объект со строковым `status: ready`; persistence нет | Специфицировано; текущая модель недостаточна | Этапы 2, 5 |
-| Номенклатура Draft | FR использует `EDITING`, архитектурная диаграмма — `DRAFTING`/`TRANSCRIPT_REVIEW`; posting FR начинается с `PENDING`, архитектура — `CLAIMED` | Enum ещё не закреплены migration-контрактом | **Противоречие** | **Решение до schema v1:** канонические enum; рекомендация — FR-состояния, а transient UI состояния хранить отдельными flags |
+| Номенклатура Draft | FR использует `EDITING`, архитектурная диаграмма — `DRAFTING`/`TRANSCRIPT_REVIEW`; posting FR начинается с `PENDING`, архитектура — `CLAIMED` | Schema v1 и D-025 закрепляют `EDITING`/`PENDING`; transient состояния вынесены из persistent enum | **Закрыто** | Этап 2: migration contract tests отклоняют `DRAFTING`/`CLAIMED` |
 | Telegram/channel boundary | Только выделенный account и DM, peer isolation, destination lock | Config задаёт binding, `groupPolicy: disabled`, peer DM scope; server-side pre-tool/hook checks не доказаны | Частично специфицировано; нужна E2E evidence | Этапы 1, 15 |
 | Knowledge Catalog | Immutable version/checksum/schema, verified routes/options/PO destinations, atomic activation/rollback | Markdown-заготовка и `readFile`; нет schema/checksum/import/storage | Специфицировано; lifecycle OPEN | **Блокер production Catalog:** D-012/O-001, этап 6 |
 | Voice/STT | Локальный Whisper `medium`, review/correction, bounded retention | Не реализовано; image/runtime/resources не подтверждены | Специфицировано + нужно доказательство ресурсов | Этап 7; capacity evidence в 15/16 |
@@ -63,7 +63,7 @@
 
 ### Блокирующие решения/evidence
 
-1. **Канонические enum schema v1.** Согласовать `EDITING` vs `DRAFTING` и `PENDING/CLAIMED` до первой migration. Рекомендуемый default: публичные/персистентные значения из FR-101—FR-103; `TRANSCRIPT_REVIEW` и `CLAIMED` представить отдельным transcript/operation substate, не вторым словарём.
+1. **Канонические enum schema v1 — закрыто D-025.** Persistent значения следуют FR-101—FR-103: `EDITING` и `PENDING`; `TRANSCRIPT_REVIEW` проектируется отдельным transcript/substate, а atomic claim — уникальной `PENDING` operation до перехода в `POSTING`.
 2. **D-012 / O-001:** authoritative sources, reviewer, publication, cadence и rollback Catalog.
 3. **O-002:** production create metadata, exact JSON shapes/allowed option IDs и ограничения строк. GET существующих issues не является evidence write contract.
 4. **O-003:** service account, auth scheme, minimal search/create scope и rotation proof.
