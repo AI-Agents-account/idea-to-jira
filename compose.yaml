@@ -20,6 +20,7 @@ x-openclaw-common: &openclaw-common
   volumes:
     - ./config/openclaw.json5:/home/node/.openclaw/openclaw.json5:ro
     - ./data/state:/home/node/.openclaw
+    - ${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-./data/auth-profile-secrets}:/home/node/.config/openclaw
     - ./data/workspace:/home/node/.openclaw/workspace
     - ./knowledge:/home/node/.openclaw/workspace/knowledge:ro
   read_only: true
