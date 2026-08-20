@@ -65,12 +65,19 @@
 - Concurrency: два approve, approve-vs-deny, revoke race, stale callback/replay.
 - Security: forged admin ID, sender ID в text/params, чужой Draft, blocked user, destination substitution.
 
-## Acceptance и exit criteria
+## Acceptance criteria
 
 - Только allowlisted Admin по host-derived ID создаёт active Creator grant.
 - Решение и audit атомарны; повтор/replay не меняет outcome.
 - Revoke/suspend блокирует новые Creator-only operations.
 - Guest access request работает без раскрытия Jira/private Draft.
+
+## Exit criteria
+
+- Transition, concurrency, replay, spoofing и cross-peer authorization tests проходят.
+- Trusted admin identity/allowlist и callback behavior подтверждены на фактическом OpenClaw/Telegram boundary.
+- Этап 5 получает owner/role APIs и server-side role recheck; ни один Creator-only path не доверяет model params.
+- Jira write остаётся выключен до этапа 13.
 
 ## Traceability
 

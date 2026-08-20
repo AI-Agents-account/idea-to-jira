@@ -65,12 +65,19 @@
 - Audit: append-only behavior, atomic write с role/state transition, correction event.
 - Leak tests: fixtures/log capture не содержат secrets, raw descriptions, transcripts; metric labels bounded.
 
-## Acceptance и exit criteria
+## Acceptance criteria
 
 - Каждая security-sensitive операция может атомарно записать санитаризированный audit.
 - Логи/метрики различают outcomes, но не несут пользовательский текст.
 - Correlation ID нигде не трактуется Jira key/idempotency API.
 - Новые сервисы имеют обязательный audit/redaction integration contract.
+
+## Exit criteria
+
+- Redaction/leak, append-only audit и atomic failure-path tests проходят.
+- Event taxonomy, metric cardinality limits и retention inputs versioned; нерешённые production сроки помечены blocker этапа 14.
+- Этап 4 получает обязательный audit API, который невозможно обойти для grant/revoke/deny.
+- Jira write остаётся выключен при любой audit/storage degradation.
 
 ## Traceability
 

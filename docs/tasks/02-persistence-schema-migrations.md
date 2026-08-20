@@ -66,12 +66,19 @@
 - Migration: empty→latest, each supported previous→latest, interrupted migration, repeat guard, future version reject.
 - Recovery: WAL restart, corruption fixture/failed check, permission mismatch.
 
-## Acceptance и exit criteria
+## Acceptance criteria
 
 - Schema создаётся/обновляется детерминированно и имеет проверяемую версию.
 - Critical transaction не может завершиться частично; concurrent claims блокируются constraints.
 - Restart не теряет committed records; invalid DB никогда не открывает Jira write.
 - DB, WAL и test backups отсутствуют в Git diff/artifacts.
+
+## Exit criteria
+
+- Fresh/upgrade/interrupted/future-schema migration и recovery suites проходят.
+- Persistent enum schema v1 согласована и зафиксирована migration contract tests.
+- Storage paths, owner/modes и SQLite durability проверены внутри целевого контейнера.
+- Этапы 3–5 могут использовать единый transaction/repository boundary без обхода constraints; Jira write остаётся выключен.
 
 ## Traceability
 

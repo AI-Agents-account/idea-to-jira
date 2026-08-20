@@ -67,12 +67,18 @@
 - Security: spoofed sender/chat/account в params/model text, group update, destination substitution, forbidden tool registration.
 - Native: `npm run validate:json`, `npm run check`, `npm run build`, Compose rendering/preflight.
 
-## Acceptance и exit criteria
+## Acceptance criteria
 
 - Все business handlers получают только валидированный trusted requester context.
 - Tool/config snapshot доказывает deny-by-default; Jira POST недостижим.
 - Ошибка критичной конфигурации видна оператору безопасным кодом и не раскрывает значение.
 - Health не заявляет readiness Jira/Telegram/model/Catalog.
+
+## Exit criteria
+
+- Config, requester-context и forbidden-tool tests проходят в CI.
+- Production Jira transport отсутствует или неизменно принудительно выключен.
+- Проверены runtime paths/permissions, необходимые этапу 2; все неподтверждённые OpenClaw hooks оставлены явными blockers, а не assumptions в коде.
 
 ## Traceability
 
