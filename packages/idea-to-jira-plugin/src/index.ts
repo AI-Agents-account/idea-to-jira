@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type {
   PluginHookAgentContext,
@@ -10,7 +12,11 @@ import { assertCreateDisabled, IDEA_TO_JIRA_TOOL, loadEffectiveConfig } from "./
 import type { IdeaInput } from "./domain/idea.js";
 import { DisabledJiraIssueClient } from "./jira/client.js";
 import { requesterFromAgentRun, requesterFromToolContext } from "./runtime/requester-context.js";
-import { ensurePrivateStateDirectory } from "./runtime/state.js";
+import {
+  openPluginDatabase,
+  UPGRADE_BACKUP_FILENAME,
+  type PluginDatabase,
+} from "./storage/database.js";
 import {
   assertPayloadWithinLimit,
   requireRateLimit,
@@ -68,16 +74,36 @@ const plugin = {
 
     const config = loaded.config;
     assertCreateDisabled(config);
-    try {
-      ensurePrivateStateDirectory(config.stateDir);
-    } catch {
-      registerStartupDisabledGate(api, "STATE_DIR_INVALID");
-      return;
-    }
     const drafts = new IdeaToJiraDraftService({ jiraProjectKey: config.jira.projectKey });
     const jira = new DisabledJiraIssueClient();
     const limiter = new TokenBucketRateLimiter(config.limits);
     const audit = createAuditSink(api);
+    let storage: PluginDatabase | undefined;
+    let storageFailureCode = "STORAGE_NOT_READY";
+
+    api.registerService({
+      id: "idea-to-jira-storage",
+      start() {
+        try {
+          storage = openPluginDatabase({
+            stateDir: config.stateDir,
+            upgradeBackupPath: join(config.stateDir, UPGRADE_BACKUP_FILENAME),
+          });
+          storageFailureCode = "STORAGE_NOT_READY";
+          api.logger.info(`idea-to-jira storage ready schema=${storage.health.schemaVersion}`);
+        } catch {
+          storage = undefined;
+          storageFailureCode = "STORAGE_STARTUP_FAILED";
+          api.logger.error("idea-to-jira storage disabled code=STORAGE_STARTUP_FAILED");
+        }
+      },
+      stop() {
+        const activeStorage = storage;
+        storage = undefined;
+        storageFailureCode = "STORAGE_NOT_READY";
+        activeStorage?.close();
+      },
+    });
 
     // Keep the disabled adapter in the effective service graph so no future handler can
     // accidentally obtain an unguarded Jira client from this foundation.
@@ -89,6 +115,16 @@ const plugin = {
         event: PluginHookBeforeAgentRunEvent,
         context: PluginHookAgentContext,
       ): PluginHookBeforeAgentRunResult => {
+        if (!storage) {
+          audit.record({ operation: "model_run", outcome: "rejected", code: storageFailureCode });
+          return {
+            outcome: "block",
+            reason: storageFailureCode,
+            message: "This request is unavailable.",
+            category: "access_policy",
+          };
+        }
+
         const requester = requesterFromAgentRun(event, context, config);
         if (!requester.ok) {
           audit.record({ operation: "model_run", outcome: "rejected", code: requester.code });
@@ -117,6 +153,7 @@ const plugin = {
 
     api.registerTool(
       (toolContext) => {
+        if (!storage) return null;
         const requester = requesterFromToolContext(toolContext, config);
         if (!requester.ok) return null;
 
@@ -127,6 +164,7 @@ const plugin = {
           parameters,
           async execute(_toolCallId: string, input: unknown) {
             try {
+              if (!storage) throw new Error(storageFailureCode);
               requireRateLimit(limiter, requester.context, "validate_draft");
               assertPayloadWithinLimit(input, config);
               assertCreateDisabled(config);

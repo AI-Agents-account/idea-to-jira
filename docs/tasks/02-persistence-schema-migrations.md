@@ -9,7 +9,7 @@
 ## Порядок и зависимости
 
 - Этап 01: validated paths/config и create-disabled startup.
-- До schema v1 закрыть nomenclature decision по persistent enums `EDITING/DRAFTING`, `PENDING/CLAIMED`; не выпускать две несовместимые машины состояний.
+- Canonical enum decision закрыт D-025: schema v1 использует `EDITING` и `PENDING`; `DRAFTING`/`CLAIMED` не выпускаются как вторая машина состояний.
 
 ## Scope
 
@@ -86,6 +86,15 @@ BR-012; FR-025—FR-026, FR-035, FR-062, FR-072—FR-073, FR-100—FR-104; NFR-0
 
 ## Риски, unknowns и decisions
 
-- Конкретный driver и migration tooling не выбраны — исследовать, не выдумывать.
-- Persistent enum conflict должен быть закрыт до первой опубликованной migration.
-- Read-only root + volume ownership могут не дать требуемые modes; проверить в container integration test.
+- Driver decision закрыт D-024: встроенный `node:sqlite` проверен на pinned Node `24.19.0`; дополнительный native addon/dependency не добавлен.
+- Persistent enum conflict закрыт D-025 и migration contract tests.
+- Read-only root + volume ownership проверяются target-container smoke test с UID/GID фактически собранного image.
+- WAL не копируется как одиночный live DB-файл: `createConsistentBackup()` использует SQLite online backup API, restore проверяет application ID, migration history, `quick_check` и foreign keys.
+
+## Реализационные evidence
+
+- Schema и migrations: `packages/idea-to-jira-plugin/src/storage/migrations/`.
+- Connection/startup/health/permissions/backup: `packages/idea-to-jira-plugin/src/storage/`.
+- Contract, recovery и operator verification: `docs/STORAGE.md`.
+- Unit/integration evidence: `packages/idea-to-jira-plugin/tests/storage.test.ts` и `storage-startup.test.ts`.
+- Target-container smoke: `scripts/storage-container-check.mjs` и CI step `Verify SQLite durability and mount permissions in target container`.

@@ -19,6 +19,6 @@ COPY --from=plugin-build /src/packages/idea-to-jira-plugin/dist ./dist
 RUN npm install --omit=dev --ignore-scripts --legacy-peer-deps \
   && npm cache clean --force
 
-COPY scripts/healthcheck.mjs scripts/create-readiness.mjs /app/scripts/
-RUN chown -R node:node /app/extensions/idea-to-jira-plugin /app/scripts/healthcheck.mjs /app/scripts/create-readiness.mjs
+COPY scripts/healthcheck.mjs scripts/create-readiness.mjs scripts/storage-container-check.mjs /app/scripts/
+RUN chown -R node:node /app/extensions/idea-to-jira-plugin /app/scripts/healthcheck.mjs /app/scripts/create-readiness.mjs /app/scripts/storage-container-check.mjs
 USER node
