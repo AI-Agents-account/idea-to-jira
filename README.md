@@ -29,7 +29,7 @@
 - уведомления автору, Business Admin и Product Owner;
 - production monitoring, alerts, runbooks, security/integration/E2E и performance evidence.
 
-Целевые возможности и принятые ограничения описаны в [бизнес-требованиях](docs/BUSINESS_REQUIREMENTS.md), [функциональных требованиях](docs/FUNCTIONAL_REQUIREMENTS.md), [нефункциональных требованиях](docs/NON_FUNCTIONAL_REQUIREMENTS.md), [контракте Jira create](docs/JIRA_CREATE_CONTRACT.md) и [журнале решений](docs/DECISIONS.md). Текущее и целевое состояние разведены в [архитектуре](ARCHITECTURE.md).
+Целевые возможности и принятые ограничения описаны в [бизнес-требованиях](docs/BUSINESS_REQUIREMENTS.md), [функциональных требованиях](docs/FUNCTIONAL_REQUIREMENTS.md), [нефункциональных требованиях](docs/NON_FUNCTIONAL_REQUIREMENTS.md), [контракте Jira create](docs/JIRA_CREATE_CONTRACT.md) и [журнале решений](docs/DECISIONS.md). Текущее и целевое состояние разведены в [архитектуре](ARCHITECTURE.md). Полная последовательность оставшейся реализации и quality gates собрана в [декомпозиции задач](docs/tasks/README.md).
 
 ## Роли целевой системы
 
