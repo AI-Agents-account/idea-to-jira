@@ -1,0 +1,12 @@
+{
+  "summary": "Reduce onboarding friction",
+  "problem": "New users cannot find the import action.",
+  "desiredOutcome": "Make the first import discoverable.",
+  "evidence": [
+    "Three anonymized usability sessions"
+  ],
+  "labels": [
+    "idea-intake",
+    "onboarding"
+  ]
+}

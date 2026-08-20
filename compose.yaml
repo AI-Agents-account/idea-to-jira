@@ -1,0 +1,55 @@
+name: idea-to-jira
+
+x-openclaw-common: &openclaw-common
+  image: idea-to-jira-openclaw:${OPENCLAW_VERSION:-2026.7.1-2}
+  build:
+    context: .
+    args:
+      OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.7.1-2}
+  environment:
+    HOME: /home/node
+    OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json5
+    OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?set OPENCLAW_GATEWAY_TOKEN in .env}
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
+    JIRA_BASE_URL: ${JIRA_BASE_URL:?set JIRA_BASE_URL in .env}
+    JIRA_TOKEN: ${JIRA_TOKEN:?set JIRA_TOKEN in .env}
+    JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-FPF}
+    JIRA_ISSUE_TYPE_ID: ${JIRA_ISSUE_TYPE_ID:-11500}
+    BUSINESS_ADMIN_TELEGRAM_IDS: ${BUSINESS_ADMIN_TELEGRAM_IDS:?set BUSINESS_ADMIN_TELEGRAM_IDS in .env}
+    KNOWLEDGE_CATALOG_PATH: ${KNOWLEDGE_CATALOG_PATH:-/home/node/.openclaw/workspace/knowledge/catalog.md}
+  volumes:
+    - ./config/openclaw.json5:/home/node/.openclaw/openclaw.json5:ro
+    - ./data/state:/home/node/.openclaw
+    - ./data/workspace:/home/node/.openclaw/workspace
+    - ./knowledge:/home/node/.openclaw/workspace/knowledge:ro
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  openclaw-gateway:
+    <<: *openclaw-common
+    container_name: idea-to-jira-openclaw
+    command: ["gateway", "--bind", "lan", "--port", "18789"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}:18789"
+    healthcheck:
+      test: ["CMD", "node", "/app/scripts/healthcheck.mjs"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  openclaw-cli:
+    <<: *openclaw-common
+    profiles: ["cli"]
+    entrypoint: ["openclaw"]
+    command: ["status"]
+    network_mode: "service:openclaw-gateway"
+    depends_on:
+      - openclaw-gateway

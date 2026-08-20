@@ -1,0 +1,20 @@
+{
+  "id": "idea-to-jira",
+  "name": "Idea to Jira",
+  "description": "Idea intake, duplicate search and Jira Feature creation workflow for OpenClaw.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "jiraProjectKey": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]{1,19}$",
+        "default": "FPF"
+      },
+      "catalogPath": {
+        "type": "string"
+      }
+    }
+  }
+}

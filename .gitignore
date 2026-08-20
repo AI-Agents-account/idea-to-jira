@@ -1,0 +1,23 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Local secrets and operator-specific overrides.
+.env
+.env.*
+!.env.example
+compose.override.yaml
+
+# Runtime state must never enter the public repository.
+data/**
+!data/state/
+!data/state/.gitkeep
+!data/workspace/
+!data/workspace/.gitkeep
+
+# Editor and OS files.
+.DS_Store
+.idea/
+.vscode/
+*.swp

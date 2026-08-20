@@ -1,0 +1,21 @@
+{
+  "name": "idea-to-jira",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenClaw plugin and Docker deployment scaffold for an idea-to-Jira MVP.",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @idea-to-jira/openclaw-plugin",
+    "clean": "npm run clean --workspace @idea-to-jira/openclaw-plugin",
+    "lint": "npm run lint --workspace @idea-to-jira/openclaw-plugin",
+    "test": "npm run test --workspace @idea-to-jira/openclaw-plugin",
+    "check": "npm run lint && npm run test",
+    "validate:json": "node scripts/validate-json.mjs"
+  }
+}
