@@ -16,6 +16,8 @@
     "lint": "npm run lint --workspace @idea-to-jira/openclaw-plugin",
     "test": "npm run test --workspace @idea-to-jira/openclaw-plugin",
     "check": "npm run lint && npm run test",
-    "validate:json": "node scripts/validate-json.mjs"
+    "validate:json": "node scripts/validate-json.mjs",
+    "readiness:create": "node scripts/create-readiness.mjs",
+    "verify:create-disabled": "node scripts/create-readiness.mjs --expect-disabled"
   }
 }

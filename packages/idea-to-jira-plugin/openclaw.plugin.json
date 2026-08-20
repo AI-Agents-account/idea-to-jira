@@ -1,20 +1,131 @@
 {
   "id": "idea-to-jira",
-  "name": "Idea to Jira",
-  "description": "Idea intake, duplicate search and Jira Feature creation workflow for OpenClaw.",
+  "name": "Idea-to-Jira MVP",
+  "description": "Fail-closed runtime, configuration, and security foundation for the Idea-to-Jira workflow.",
   "version": "0.1.0",
+  "contracts": {
+    "tools": ["idea_to_jira_validate_draft"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
+    "required": [
+      "agentId",
+      "telegram",
+      "notifications",
+      "jira",
+      "catalog",
+      "sttModel",
+      "allowedTools",
+      "limits",
+      "retention",
+      "stateDir"
+    ],
     "properties": {
-      "jiraProjectKey": {
-        "type": "string",
-        "pattern": "^[A-Z][A-Z0-9_]{1,19}$",
-        "default": "FPF"
+      "agentId": { "const": "idea-mvp" },
+      "telegram": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channelId", "accountId", "adminSenderIdsEnv"],
+        "properties": {
+          "channelId": { "const": "telegram" },
+          "accountId": { "const": "idea-mvp" },
+          "adminSenderIdsEnv": { "const": "BUSINESS_ADMIN_TELEGRAM_IDS" }
+        }
       },
-      "catalogPath": {
-        "type": "string"
-      }
+      "notifications": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["productOwnerSenderIdsEnv"],
+        "properties": {
+          "productOwnerSenderIdsEnv": { "const": "PRODUCT_OWNER_TELEGRAM_IDS" }
+        }
+      },
+      "jira": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "originEnv",
+          "tokenEnv",
+          "projectKey",
+          "projectId",
+          "issueTypeName",
+          "issueTypeId",
+          "writeMode"
+        ],
+        "properties": {
+          "originEnv": { "const": "JIRA_BASE_URL" },
+          "tokenEnv": { "const": "JIRA_TOKEN" },
+          "projectKey": { "const": "FPF" },
+          "projectId": { "const": "18100" },
+          "issueTypeName": { "const": "Feature" },
+          "issueTypeId": { "const": "11500" },
+          "writeMode": { "const": "disabled" }
+        }
+      },
+      "catalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "schemaVersion", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "schemaVersion": { "const": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      },
+      "sttModel": { "const": "medium" },
+      "allowedTools": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 1,
+        "prefixItems": [{ "const": "idea_to_jira_validate_draft" }],
+        "items": false
+      },
+      "limits": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["inputTextChars", "requestsPerMinute", "burst"],
+        "properties": {
+          "inputTextChars": { "type": "integer", "minimum": 1, "maximum": 50000 },
+          "requestsPerMinute": { "type": "integer", "minimum": 1, "maximum": 1000 },
+          "burst": { "type": "integer", "minimum": 1, "maximum": 1000 }
+        }
+      },
+      "retention": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["draftDays", "auditDays"],
+        "properties": {
+          "draftDays": { "type": "integer", "minimum": 1, "maximum": 3650 },
+          "auditDays": { "type": "integer", "minimum": 1, "maximum": 3650 }
+        }
+      },
+      "stateDir": { "type": "string", "minLength": 1 }
+    }
+  },
+  "uiHints": {
+    "notifications.productOwnerSenderIdsEnv": {
+      "label": "Product Owner route allowlist environment variable",
+      "sensitive": true,
+      "advanced": true
+    },
+    "jira.originEnv": {
+      "label": "Jira origin environment variable",
+      "advanced": true
+    },
+    "jira.tokenEnv": {
+      "label": "Jira credential environment variable",
+      "sensitive": true,
+      "advanced": true
+    },
+    "telegram.adminSenderIdsEnv": {
+      "label": "Admin sender allowlist environment variable",
+      "sensitive": true,
+      "advanced": true
+    },
+    "catalog.sha256": {
+      "label": "Approved Catalog SHA-256",
+      "advanced": true
     }
   }
 }

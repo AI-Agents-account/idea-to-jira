@@ -15,6 +15,8 @@ data/**
 !data/state/.gitkeep
 !data/workspace/
 !data/workspace/.gitkeep
+!data/plugin-state/
+!data/plugin-state/.gitkeep
 
 # Editor and OS files.
 .DS_Store

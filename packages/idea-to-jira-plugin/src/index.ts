@@ -1,71 +1,156 @@
-import {
-  definePluginEntry,
-  type OpenClawPluginDefinition,
-} from "openclaw/plugin-sdk/plugin-entry";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type {
+  PluginHookAgentContext,
+  PluginHookBeforeAgentRunEvent,
+  PluginHookBeforeAgentRunResult,
+} from "openclaw/plugin-sdk/types";
 import { Type } from "typebox";
-import { parsePluginConfig } from "./config.js";
+
+import { assertCreateDisabled, IDEA_TO_JIRA_TOOL, loadEffectiveConfig } from "./config.js";
 import type { IdeaInput } from "./domain/idea.js";
+import { DisabledJiraIssueClient } from "./jira/client.js";
+import { requesterFromAgentRun, requesterFromToolContext } from "./runtime/requester-context.js";
+import { ensurePrivateStateDirectory } from "./runtime/state.js";
+import {
+  assertPayloadWithinLimit,
+  requireRateLimit,
+  TokenBucketRateLimiter,
+  type AuditSink,
+  type SecurityAuditEvent,
+} from "./runtime/policy.js";
 import { IdeaToJiraDraftService } from "./workflow/draft-service.js";
+import { validateDraftForRequester } from "./workflow/validate-draft-handler.js";
 
-function parseIdeaInput(value: unknown): IdeaInput {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("tool input must be an object");
-  }
-  const input = value as Record<string, unknown>;
-  for (const field of ["summary", "problem", "desiredOutcome"] as const) {
-    if (typeof input[field] !== "string") {
-      throw new Error(`${field} must be a string`);
-    }
-  }
-  for (const field of ["evidence", "labels"] as const) {
-    if (
-      input[field] !== undefined &&
-      (!Array.isArray(input[field]) || input[field].some((item) => typeof item !== "string"))
-    ) {
-      throw new Error(`${field} must be an array of strings`);
-    }
-  }
+const parameters = Type.Object(
+  {
+    summary: Type.String({ minLength: 1, maxLength: 255 }),
+    problem: Type.String({ minLength: 1, maxLength: 10_000 }),
+    desiredOutcome: Type.String({ minLength: 1, maxLength: 10_000 }),
+    evidence: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2_000 }), { maxItems: 50 })),
+    labels: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 255 }), { maxItems: 50 })),
+  },
+  { additionalProperties: false },
+);
 
+function createAuditSink(api: OpenClawPluginApi): AuditSink {
   return {
-    summary: input.summary as string,
-    problem: input.problem as string,
-    desiredOutcome: input.desiredOutcome as string,
-    ...(Array.isArray(input.evidence) ? { evidence: input.evidence as string[] } : {}),
-    ...(Array.isArray(input.labels) ? { labels: input.labels as string[] } : {}),
+    record(event: SecurityAuditEvent): void {
+      // Fixed enum-like fields only: never sender IDs, content, destinations, origins, or credentials.
+      api.logger.info(`idea-to-jira audit operation=${event.operation} outcome=${event.outcome} code=${event.code}`);
+    },
   };
 }
 
-const plugin: OpenClawPluginDefinition = definePluginEntry({
-  id: "idea-to-jira",
-  name: "Idea to Jira",
-  description: "Supports idea intake, duplicate search and Jira Feature creation.",
-  register(api) {
-    const service = new IdeaToJiraDraftService(parsePluginConfig(api.pluginConfig));
+function registerStartupDisabledGate(api: OpenClawPluginApi, code: string): void {
+  api.logger.error(`idea-to-jira startup disabled code=${code}`);
+  api.on(
+    "before_agent_run",
+    (): PluginHookBeforeAgentRunResult => ({
+      outcome: "block",
+      reason: code,
+      message: "This request is unavailable.",
+      category: "access_policy",
+    }),
+    { priority: 1_000 },
+  );
+}
 
-    api.registerTool({
-      label: "Validate Jira Feature draft",
-      name: "idea_to_jira_validate_draft",
-      description:
-        "Validate and normalize a structured Jira Feature draft before duplicate search and creation.",
-      parameters: Type.Object(
-        {
-          summary: Type.String({ minLength: 1 }),
-          problem: Type.String({ minLength: 1 }),
-          desiredOutcome: Type.String({ minLength: 1 }),
-          evidence: Type.Optional(Type.Array(Type.String())),
-          labels: Type.Optional(Type.Array(Type.String())),
-        },
-        { additionalProperties: false },
-      ),
-      async execute(_id, params) {
-        const draft = service.createDraft(parseIdeaInput(params));
+const plugin = {
+  id: "idea-to-jira",
+  name: "Idea-to-Jira MVP",
+  description: "Fail-closed Idea-to-Jira plugin foundation; Jira create remains disabled.",
+  register(api: OpenClawPluginApi) {
+    const loaded = loadEffectiveConfig(api.pluginConfig);
+    if (!loaded.ok) {
+      registerStartupDisabledGate(api, loaded.code);
+      return;
+    }
+
+    const config = loaded.config;
+    assertCreateDisabled(config);
+    try {
+      ensurePrivateStateDirectory(config.stateDir);
+    } catch {
+      registerStartupDisabledGate(api, "STATE_DIR_INVALID");
+      return;
+    }
+    const drafts = new IdeaToJiraDraftService({ jiraProjectKey: config.jira.projectKey });
+    const jira = new DisabledJiraIssueClient();
+    const limiter = new TokenBucketRateLimiter(config.limits);
+    const audit = createAuditSink(api);
+
+    // Keep the disabled adapter in the effective service graph so no future handler can
+    // accidentally obtain an unguarded Jira client from this foundation.
+    void jira;
+
+    api.on(
+      "before_agent_run",
+      (
+        event: PluginHookBeforeAgentRunEvent,
+        context: PluginHookAgentContext,
+      ): PluginHookBeforeAgentRunResult => {
+        const requester = requesterFromAgentRun(event, context, config);
+        if (!requester.ok) {
+          audit.record({ operation: "model_run", outcome: "rejected", code: requester.code });
+          return {
+            outcome: "block",
+            reason: requester.code,
+            message: "This request is unavailable.",
+            category: "access_policy",
+          };
+        }
+
+        if (!limiter.consume(requester.context, "model_run").allowed) {
+          audit.record({ operation: "model_run", outcome: "rejected", code: "RATE_LIMITED" });
+          return {
+            outcome: "block",
+            reason: "RATE_LIMITED",
+            message: "This request is temporarily unavailable.",
+            category: "rate_limit",
+          };
+        }
+        audit.record({ operation: "model_run", outcome: "allowed", code: "POLICY_OK" });
+        return { outcome: "pass" };
+      },
+      { priority: 100 },
+    );
+
+    api.registerTool(
+      (toolContext) => {
+        const requester = requesterFromToolContext(toolContext, config);
+        if (!requester.ok) return null;
+
         return {
-          content: [{ type: "text", text: JSON.stringify(draft, null, 2) }],
-          details: draft,
+          name: IDEA_TO_JIRA_TOOL,
+          label: "Validate idea draft",
+          description: "Validate and normalize a draft Feature without writing to Jira.",
+          parameters,
+          async execute(_toolCallId: string, input: unknown) {
+            try {
+              requireRateLimit(limiter, requester.context, "validate_draft");
+              assertPayloadWithinLimit(input, config);
+              assertCreateDisabled(config);
+              audit.record({ operation: "validate_draft", outcome: "allowed", code: "POLICY_OK" });
+
+              const draft = validateDraftForRequester(requester.context, input as IdeaInput, drafts);
+              audit.record({ operation: "validate_draft", outcome: "succeeded", code: "DRAFT_VALID" });
+              return {
+                content: [{ type: "text" as const, text: JSON.stringify(draft) }],
+                details: draft,
+              };
+            } catch (error) {
+              const code = error instanceof Error && /^[A-Z_]+$/.test(error.message)
+                ? error.message
+                : "DRAFT_INVALID";
+              audit.record({ operation: "validate_draft", outcome: "failed", code });
+              throw error;
+            }
+          },
         };
       },
-    });
+      { name: IDEA_TO_JIRA_TOOL },
+    );
   },
-});
+};
 
 export default plugin;

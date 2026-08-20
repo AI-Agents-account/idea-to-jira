@@ -1,77 +1,110 @@
 {
-  // Every Telegram DM gets its own isolated OpenClaw session.
-  session: {
-    dmScope: "per-account-channel-peer",
-  },
-
   agents: {
+    defaults: {
+      workspace: "/home/node/.openclaw/workspace",
+      skipBootstrap: true,
+    },
     list: [
       {
         id: "idea-mvp",
         default: true,
+        name: "Idea-to-Jira MVP",
         workspace: "/home/node/.openclaw/workspace",
-        skills: [],
         tools: {
-          // Extend only with the explicit plugin tools introduced by the MVP.
           allow: ["idea_to_jira_validate_draft"],
         },
       },
     ],
   },
-
+  session: {
+    dmScope: "per-account-channel-peer",
+  },
   bindings: [
     {
-      type: "route",
       agentId: "idea-mvp",
-      match: { channel: "telegram", accountId: "idea-mvp" },
+      match: {
+        channel: "telegram",
+        accountId: "idea-mvp",
+      },
     },
   ],
-
   channels: {
     telegram: {
+      enabled: true,
+      defaultAccount: "idea-mvp",
+      dmPolicy: "open",
+      allowFrom: ["*"],
+      groupPolicy: "disabled",
       accounts: {
         "idea-mvp": {
-          botToken: {
-            source: "env",
-            provider: "default",
-            id: "TELEGRAM_BOT_TOKEN",
-          },
+          enabled: true,
+          botToken: "${TELEGRAM_BOT_TOKEN}",
           dmPolicy: "open",
           allowFrom: ["*"],
           groupPolicy: "disabled",
-          capabilities: { inlineButtons: "off" },
         },
       },
     },
   },
-
   plugins: {
     allow: ["idea-to-jira"],
     load: {
-      paths: ["/app/extensions/idea-to-jira-plugin"],
+      paths: ["${IDEA_TO_JIRA_PLUGIN_PATH}"],
     },
     entries: {
       "idea-to-jira": {
         enabled: true,
+        hooks: {
+          // Required by OpenClaw 2026.7.1-2 for the typed before_agent_run gate.
+          allowConversationAccess: true,
+        },
         config: {
-          jiraProjectKey: "FPF",
-          catalogPath: "/home/node/.openclaw/workspace/knowledge/catalog.md",
+          agentId: "idea-mvp",
+          telegram: {
+            channelId: "telegram",
+            accountId: "idea-mvp",
+            adminSenderIdsEnv: "BUSINESS_ADMIN_TELEGRAM_IDS",
+          },
+          notifications: {
+            productOwnerSenderIdsEnv: "PRODUCT_OWNER_TELEGRAM_IDS",
+          },
+          jira: {
+            originEnv: "JIRA_BASE_URL",
+            tokenEnv: "JIRA_TOKEN",
+            projectKey: "FPF",
+            projectId: "18100",
+            issueTypeName: "Feature",
+            issueTypeId: "11500",
+            writeMode: "disabled",
+          },
+          catalog: {
+            path: "/home/node/.openclaw/workspace/knowledge/catalog.md",
+            schemaVersion: 1,
+            sha256: "59fae2568168a4859458763ca08dbe9c5e35af81481553e336faec6cd3a2501b",
+          },
+          sttModel: "medium",
+          allowedTools: ["idea_to_jira_validate_draft"],
+          limits: {
+            inputTextChars: 20000,
+            requestsPerMinute: 20,
+            burst: 5,
+          },
+          retention: {
+            draftDays: 90,
+            auditDays: 365,
+          },
+          stateDir: "/home/node/.openclaw/plugin-state/idea-to-jira",
         },
       },
     },
   },
-
   gateway: {
     mode: "local",
     bind: "lan",
     port: 18789,
     auth: {
       mode: "token",
-      token: {
-        source: "env",
-        provider: "default",
-        id: "OPENCLAW_GATEWAY_TOKEN",
-      },
+      token: "${OPENCLAW_GATEWAY_TOKEN}",
     },
   },
 }
