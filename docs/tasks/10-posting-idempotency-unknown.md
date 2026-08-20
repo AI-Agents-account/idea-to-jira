@@ -27,8 +27,8 @@ Production Jira HTTP POST, manual reconciliation UI/runbook, PO notification del
 
 ## Компоненты и файлы
 
-- `src/posting/readiness-claim-service.ts`, `posting-service.ts`, `state-machine.ts`.
-- `src/posting/idempotency.ts`, `transport-result.ts`, `retry-policy.ts`.
+- `packages/idea-to-jira-plugin/src/posting/readiness-claim-service.ts`, `posting-service.ts`, `state-machine.ts`.
+- `packages/idea-to-jira-plugin/src/posting/idempotency.ts`, `transport-result.ts`, `retry-policy.ts`.
 - Operation repositories/transactions, audit/outbox.
 - Deterministic fake Jira transport with request counters/fault injection.
 

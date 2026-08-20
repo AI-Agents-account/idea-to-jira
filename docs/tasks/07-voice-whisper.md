@@ -26,7 +26,7 @@ Voice изменяет Draft version и readiness, поэтому строитс
 
 ## Компоненты и файлы
 
-- `src/voice/telegram-voice-handler.ts`, `whisper-adapter.ts`, `transcript-service.ts`, `queue.ts`.
+- `packages/idea-to-jira-plugin/src/voice/telegram-voice-handler.ts`, `whisper-adapter.ts`, `transcript-service.ts`, `queue.ts`.
 - Runtime config/Compose/Dockerfile для local model/runtime и bounded temp storage.
 - Transcript persistence/ref в Draft.
 - Integration fixtures synthetic and non-personal; no committed audio unless explicitly synthetic/licensed and minimal.

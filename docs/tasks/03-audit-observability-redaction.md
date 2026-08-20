@@ -25,7 +25,7 @@
 
 ## Конкретные компоненты и файлы
 
-- целевые `src/audit/*`, `src/observability/*`, `src/security/redaction.ts`, `src/errors/*`;
+- целевые `packages/idea-to-jira-plugin/src/audit/*`, `packages/idea-to-jira-plugin/src/observability/*`, `packages/idea-to-jira-plugin/src/security/redaction.ts`, `packages/idea-to-jira-plugin/src/errors/*`;
 - audit schema/migration и tests/fixtures;
 - `scripts/healthcheck.mjs`, config и runbook paths на следующих этапах.
 

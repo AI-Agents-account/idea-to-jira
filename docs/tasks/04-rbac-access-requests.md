@@ -25,8 +25,8 @@
 
 ## Конкретные компоненты и файлы
 
-- целевые `src/auth/authorization.ts`, `src/access/access-service.ts`, repositories и typed tools/handlers;
-- migration constraints из этапа 02; `src/index.ts` registration;
+- целевые `packages/idea-to-jira-plugin/src/auth/authorization.ts`, `packages/idea-to-jira-plugin/src/access/access-service.ts`, repositories и typed tools/handlers;
+- migration constraints из этапа 02; `packages/idea-to-jira-plugin/src/index.ts` registration;
 - Telegram callback integration только после подтверждения SDK.
 
 Указанные новые пути — целевая декомпозиция. Перед созданием файла исполнитель обязан сверить фактические OpenClaw SDK/API и сохранить узкую ответственность; путь не является разрешением выдумать неподтверждённый интерфейс.

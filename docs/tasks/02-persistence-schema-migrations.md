@@ -25,9 +25,9 @@
 
 ## Конкретные компоненты и файлы
 
-- целевые `src/storage/database.ts`, `src/storage/migrations/*`, `src/storage/transaction.ts`, `src/storage/health.ts`;
+- целевые `packages/idea-to-jira-plugin/src/storage/database.ts`, `packages/idea-to-jira-plugin/src/storage/migrations/*`, `packages/idea-to-jira-plugin/src/storage/transaction.ts`, `packages/idea-to-jira-plugin/src/storage/health.ts`;
 - `packages/idea-to-jira-plugin/package.json`/lock только после выбранного driver;
-- Compose volume/path и startup wiring в `src/index.ts`;
+- Compose volume/path и startup wiring в `packages/idea-to-jira-plugin/src/index.ts`;
 - migration/upgrade/restore fixtures и tests.
 
 Указанные новые пути — целевая декомпозиция. Перед созданием файла исполнитель обязан сверить фактические OpenClaw SDK/API и сохранить узкую ответственность; путь не является разрешением выдумать неподтверждённый интерфейс.

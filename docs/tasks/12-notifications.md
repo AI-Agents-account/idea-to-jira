@@ -26,7 +26,7 @@ Jira POST retry, workflow transitions, arbitrary message tool, user-defined dest
 
 ## Компоненты и файлы
 
-- `src/notifications/notification-service.ts`, `outbox-worker.ts`, `templates.ts`.
+- `packages/idea-to-jira-plugin/src/notifications/notification-service.ts`, `outbox-worker.ts`, `templates.ts`.
 - `route-resolver.ts`, `telegram-adapter.ts`, `retry-policy.ts`.
 - Notification repositories/delivery attempts/audit.
 - Fake Telegram transport and template snapshots.

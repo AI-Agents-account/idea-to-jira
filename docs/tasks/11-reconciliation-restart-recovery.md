@@ -27,10 +27,10 @@ Automatic POST retry from UNKNOWN, automatic candidate linking, hidden correlati
 
 ## Компоненты и файлы
 
-- `src/reconciliation/startup-recovery.ts`, `reconciliation-service.ts`, `evidence.ts`.
-- `src/reconciliation/jira-search.ts` fixed bounded operator query.
+- `packages/idea-to-jira-plugin/src/reconciliation/startup-recovery.ts`, `reconciliation-service.ts`, `evidence.ts`.
+- `packages/idea-to-jira-plugin/src/reconciliation/jira-search.ts` fixed bounded operator query.
 - Technical Owner deterministic CLI/admin handler with strong server-side authorization.
-- Runbook `docs/runbooks/unknown-reconciliation.md` (или согласованный runbooks path) без private examples.
+- Runbook `docs/runbooks/unknown-reconciliation.md` без private examples.
 - Fault-injection/restart integration harness.
 
 ## Атомарные инженерные задачи

@@ -27,7 +27,7 @@ Miro online sync, model-generated trusted catalog, произвольное ре
 ## Компоненты и файлы
 
 - `knowledge/catalog.md` заменить/дополнить machine-readable versioned artifact/fixtures без private production records в Git.
-- `src/catalog/schema.ts`, `parser.ts`, `checksum.ts`, `import-service.ts`, `route-service.ts`.
+- `packages/idea-to-jira-plugin/src/catalog/schema.ts`, `parser.ts`, `checksum.ts`, `import-service.ts`, `route-service.ts`.
 - CLI/operator command или reviewed script для offline build/validation; без secrets.
 - Catalog repositories, tests и runbook publication/rollback.
 

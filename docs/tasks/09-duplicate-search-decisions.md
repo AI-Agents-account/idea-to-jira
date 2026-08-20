@@ -26,7 +26,7 @@ Arbitrary JQL, embeddings backend, Guest details, issue updates/link creation в
 
 ## Компоненты и файлы
 
-- `src/duplicates/search-plan.ts`, `jira-search-client.ts`, `fingerprint.ts`.
+- `packages/idea-to-jira-plugin/src/duplicates/search-plan.ts`, `jira-search-client.ts`, `fingerprint.ts`.
 - `duplicate-service.ts`, `candidate-view.ts`, `decision-service.ts`.
 - Catalog/Draft/RBAC repositories; typed Creator-only tool.
 - Sanitized synthetic Jira fixtures и query contract tests.

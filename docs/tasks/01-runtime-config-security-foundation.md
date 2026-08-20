@@ -25,8 +25,8 @@
 
 ## Конкретные компоненты и файлы
 
-- `packages/idea-to-jira-plugin/src/config.ts`, `src/index.ts`;
-- целевые узкие модули `src/runtime/requester-context.ts`, `src/runtime/policy.ts` после подтверждения SDK API;
+- `packages/idea-to-jira-plugin/src/config.ts`, `packages/idea-to-jira-plugin/src/index.ts`;
+- целевые узкие модули `packages/idea-to-jira-plugin/src/runtime/requester-context.ts`, `packages/idea-to-jira-plugin/src/runtime/policy.ts` после подтверждения SDK API;
 - `packages/idea-to-jira-plugin/openclaw.plugin.json`, `config/openclaw.json5`;
 - `.env.example`, `compose.yaml`, `Dockerfile`, `scripts/preflight.sh`, `scripts/healthcheck.mjs`;
 - unit/config fixtures в `packages/idea-to-jira-plugin/tests/`.

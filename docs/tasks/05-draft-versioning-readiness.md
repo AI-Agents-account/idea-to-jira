@@ -27,10 +27,10 @@ Voice decoding, Catalog route implementation, Jira metadata/search/payload, post
 
 ## Компоненты и файлы
 
-- `src/domain/draft.ts`, `draft-state.ts`, `provenance.ts`, `readiness.ts`.
-- `src/workflow/draft-service.ts` — заменить scaffold DTO полноценным service/repository boundary.
-- `src/workflow/description-formatter.ts`, `question-policy.ts`.
-- Typed tools own-draft read/patch/request access; schema в `src/index.ts`/manifest tests.
+- `packages/idea-to-jira-plugin/src/domain/draft.ts`, `draft-state.ts`, `provenance.ts`, `readiness.ts`.
+- `packages/idea-to-jira-plugin/src/workflow/draft-service.ts` — заменить scaffold DTO полноценным service/repository boundary.
+- `packages/idea-to-jira-plugin/src/workflow/description-formatter.ts`, `question-policy.ts`.
+- Typed tools own-draft read/patch/request access; schema в `packages/idea-to-jira-plugin/src/index.ts`/manifest tests.
 - Persistence repositories и tests/fixtures.
 
 ## Атомарные инженерные задачи

@@ -27,9 +27,9 @@ Duplicate JQL/search, Jira POST, retries after POST, issue mutation и productio
 
 ## Компоненты и файлы
 
-- `src/jira/http-client.ts`, `metadata-client.ts`, `metadata-schema.ts`.
-- `src/jira/metadata-snapshot-service.ts`, repositories.
-- `src/jira/payload-mapper.ts`, `canonical-json.ts`, mapper versions.
+- `packages/idea-to-jira-plugin/src/jira/http-client.ts`, `metadata-client.ts`, `metadata-schema.ts`.
+- `packages/idea-to-jira-plugin/src/jira/metadata-snapshot-service.ts`, repositories.
+- `packages/idea-to-jira-plugin/src/jira/payload-mapper.ts`, `canonical-json.ts`, mapper versions.
 - Contract fixtures generated/sanitized from approved metadata, never private issue data.
 - `JIRA_CREATE_CONTRACT.md` update only if evidence changes normative mapping.
 
