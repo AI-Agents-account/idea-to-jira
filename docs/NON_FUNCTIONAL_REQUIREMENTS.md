@@ -41,7 +41,7 @@ MVP должен работать в отдельном Docker-контейне�
 
 ### NFR-011. Identity
 
-Единственный технический идентификатор пользователя — host-derived Telegram sender ID. Username/display name являются недоверенными snapshots. Бизнес-доверие к identity для Creator возникает только после admin decision.
+Единственный технический идентификатор пользователя — host-derived Telegram sender ID из доверенного server-side requester context. Значения sender ID из текста, model output, callback payload и client-supplied fields не могут подменить его. Username/display name являются недоверенными snapshots. Бизнес-доверие к identity для Creator возникает только после admin decision.
 
 ### NFR-012. Fail closed
 
@@ -52,9 +52,10 @@ MVP должен работать в отдельном Docker-контейне�
 Telegram bot token, Jira credential и model/OAuth credentials:
 
 - хранятся только в OpenClaw SecretRef или защищённом окружении;
-- не записываются в Git, docs, SQLite, Draft, audit, prompt или Telegram;
+- не записываются в Git, docs, plugin SQLite, Draft, audit, prompt или Telegram;
 - не передаются модели;
-- не попадают в headers/body diagnostics и error messages.
+- не попадают в headers/body diagnostics и error messages;
+- для OAuth-backed auth profiles хранятся в OpenClaw state, а локальный encryption key — в отдельном persistent `OPENCLAW_AUTH_PROFILE_SECRET_DIR`; оба mount используются Gateway и CLI, резервируются согласованно и не публикуются в Git.
 
 ### NFR-014. Credential isolation
 
@@ -70,7 +71,7 @@ Jira credential должен иметь минимальные необходи�
 
 ### NFR-017. Payload whitelist
 
-Jira payload строится из server-side allowlist. Неизвестные field IDs и произвольные значения от модели отклоняются.
+Jira payload строится из server-side allowlist. Неизвестные field IDs, произвольные значения и arbitrary JSON от модели или пользователя отклоняются и никогда не пересылаются в Jira напрямую.
 
 ### NFR-018. Admin boundary
 
@@ -91,6 +92,20 @@ Container image и plugin dependencies должны проходить SBOM/depe
 ### NFR-022. Security headers/data redaction
 
 Логи не должны содержать authorization headers, cookies, raw Telegram updates, полные Jira response bodies, voice payloads или полные описания идей.
+
+### NFR-023. Приватное сообщение об уязвимости
+
+Сведения об уязвимостях должны передаваться Technical Owner или владельцу репозитория по утверждённому приватному каналу. В публичных issues, чатах и отчётах запрещено публиковать credentials, персональные данные, приватное содержимое Jira и эксплуатационно пригодные подробности production-уязвимости до согласованного исправления и раскрытия. Runbook должен определять канал, ответственного за triage, целевой срок первичного ответа, severity и порядок координированного исправления.
+
+### NFR-024. Реакция на компрометацию credential
+
+Credential, обнаруженный в чате, issue, логе, commit, container layer, CI artifact, backup или ином неразрешённом контуре, считается скомпрометированным. До возобновления эксплуатации необходимо:
+
+1. отозвать credential у соответствующего provider;
+2. выпустить и безопасно установить новый credential;
+3. проверить затронутые доступы, repository history, artifacts, logs и backups на распространение;
+4. удалить доступные копии по утверждённой процедуре, не считая удаление заменой ротации;
+5. зафиксировать incident, affected scope и доказательство ротации без публикации значения секрета.
 
 ## 4. Надёжность и целостность
 
@@ -115,7 +130,7 @@ Role grant/revoke, Draft CAS, duplicate decision, READY claim, posting operation
 
 ### NFR-033. Неоднозначный POST
 
-После timeout/connection loss, когда request мог быть принят Jira, состояние — `UNKNOWN`. Без Jira key нет доказательства известной задачи; автоматический повторный POST и автоматическое создание новой operation запрещены.
+После timeout/connection loss, когда request мог быть принят Jira, состояние — `UNKNOWN`. Без Jira key нет доказательства известной задачи; автоматический повторный POST и автоматическое создание новой operation запрещены. До любого потенциального повтора обязательна manual reconciliation; дальнейшее действие допускается только как отдельное аудируемое решение Technical Owner по утверждённому runbook, а не как автоматический retry.
 
 ### NFR-034. Нет Jira correlation field
 
@@ -144,6 +159,7 @@ Plugin должен прекращать приём новых posting operation
 - регулярный backup plugin state и Catalog;
 - шифрование backup в соответствии с production policy;
 - отделение backup от credentials;
+- согласованное сохранение и восстановление OpenClaw auth profiles вместе с отдельным auth-profile encryption key, без включения их в прикладной backup/export;
 - периодическая restore-проверка;
 - документированные RPO/RTO до production go-live.
 
@@ -334,7 +350,8 @@ Audit хранит IDs, версии, hashes, решения и коды исх�
 
 - deploy/rollback;
 - backup/restore;
-- secret rotation;
+- secret rotation и response на обнаружение credential в Git/chat/log/artifact;
+- private vulnerability reporting и incident triage;
 - Jira 401/403/429/5xx;
 - `UNKNOWN` manual reconciliation;
 - Catalog publish/rollback;
@@ -361,7 +378,9 @@ Audit хранит IDs, версии, hashes, решения и коды исх�
 - arbitrary Jira URL/project/field/JQL;
 - destination substitution;
 - concurrent READY triggers;
-- secret/log leakage.
+- secret/log leakage;
+- обнаружение запрещённых secret patterns в repository, image layers и CI artifacts;
+- безопасную ротацию тестового credential после simulated leak.
 
 ### NFR-092. Integration tests
 
