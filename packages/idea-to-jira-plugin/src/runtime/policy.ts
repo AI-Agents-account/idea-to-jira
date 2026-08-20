@@ -51,18 +51,6 @@ export class TokenBucketRateLimiter implements RateLimiter {
   }
 }
 
-export type AuditOutcome = "allowed" | "rejected" | "succeeded" | "failed";
-
-export interface SecurityAuditEvent {
-  readonly operation: PolicyOperation;
-  readonly outcome: AuditOutcome;
-  readonly code: string;
-}
-
-export interface AuditSink {
-  record(event: SecurityAuditEvent): void;
-}
-
 export function assertPayloadWithinLimit(value: unknown, config: EffectiveConfig): void {
   let serialized: string;
   try {

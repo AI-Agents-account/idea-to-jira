@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -52,7 +53,7 @@ test("target-container storage verification is wired into the image and CI", asy
   assert.match(workflow, /storage-container-check\.mjs/);
   assert.doesNotMatch(workflow, /compose[^\n]*run[^\n]*--no-deps/);
   assert.match(storageCheck, /openPluginDatabase/);
-  assert.match(storageCheck, /schema=1 journal=wal modes=private restart=ok/);
+  assert.match(storageCheck, /schema=2 journal=wal modes=private restart=ok/);
 });
 
 test("health and create-readiness are separate signals", async () => {
@@ -61,4 +62,20 @@ test("health and create-readiness are separate signals", async () => {
   assert.match(compose, /healthcheck\.mjs/);
   assert.equal(packageJson.scripts["readiness:create"], "node scripts/create-readiness.mjs");
   assert.equal(packageJson.scripts["verify:create-disabled"], "node scripts/create-readiness.mjs --expect-disabled");
+});
+
+test("healthcheck never prints configured URL credentials or raw exceptions", () => {
+  const secret = ["health", "credential", "fixture"].join("-");
+  const result = spawnSync(process.execPath, [resolve(root, "scripts/healthcheck.mjs")], {
+    cwd: root,
+    env: {
+      ...process.env,
+      OPENCLAW_HEALTH_URL: `https://user:${secret}@example.test/healthz`,
+    },
+    encoding: "utf8",
+  });
+  const output = `${result.stdout}${result.stderr}`;
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(output, new RegExp(secret));
+  assert.match(output, /"code":"HEALTHCHECK_CONFIG_INVALID"/);
 });

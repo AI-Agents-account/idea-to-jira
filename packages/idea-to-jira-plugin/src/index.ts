@@ -1,5 +1,9 @@
 import { join } from "node:path";
 
+import { createAuditEvent, hashAuditActorReference, SqliteAuditWriter } from "./audit/index.js";
+import { isSafeErrorCode, SafeError } from "./errors/index.js";
+import { createCorrelationContext, StructuredLogger } from "./observability/index.js";
+
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type {
   PluginHookAgentContext,
@@ -21,8 +25,6 @@ import {
   assertPayloadWithinLimit,
   requireRateLimit,
   TokenBucketRateLimiter,
-  type AuditSink,
-  type SecurityAuditEvent,
 } from "./runtime/policy.js";
 import { IdeaToJiraDraftService } from "./workflow/draft-service.js";
 import { validateDraftForRequester } from "./workflow/validate-draft-handler.js";
@@ -38,13 +40,35 @@ const parameters = Type.Object(
   { additionalProperties: false },
 );
 
-function createAuditSink(api: OpenClawPluginApi): AuditSink {
-  return {
-    record(event: SecurityAuditEvent): void {
-      // Fixed enum-like fields only: never sender IDs, content, destinations, origins, or credentials.
-      api.logger.info(`idea-to-jira audit operation=${event.operation} outcome=${event.outcome} code=${event.code}`);
-    },
-  };
+const auditWriter = new SqliteAuditWriter();
+
+function persistAudit(
+  storage: PluginDatabase,
+  logger: StructuredLogger,
+  event: ReturnType<typeof createAuditEvent>,
+): boolean {
+  try {
+    storage.repositories.criticalTransaction(({ sql }) => auditWriter.append(sql, event));
+    logger.emit("INFO", {
+      timestamp: event.occurredAt,
+      component: "AUDIT",
+      eventType: event.action,
+      outcome: event.outcome,
+      ...(event.links.correlationId ? { correlationId: event.links.correlationId } : {}),
+      ...(event.links.operationId ? { operationId: event.links.operationId } : {}),
+    });
+    return true;
+  } catch {
+    logger.emit("ERROR", {
+      timestamp: new Date().toISOString(),
+      component: "AUDIT",
+      eventType: "AUDIT_APPEND",
+      outcome: "FAILED",
+      ...(event.links.correlationId ? { correlationId: event.links.correlationId } : {}),
+      errorCode: "AUDIT_APPEND_FAILED",
+    });
+    return false;
+  }
 }
 
 function registerStartupDisabledGate(api: OpenClawPluginApi, code: string): void {
@@ -77,7 +101,7 @@ const plugin = {
     const drafts = new IdeaToJiraDraftService({ jiraProjectKey: config.jira.projectKey });
     const jira = new DisabledJiraIssueClient();
     const limiter = new TokenBucketRateLimiter(config.limits);
-    const audit = createAuditSink(api);
+    const logger = new StructuredLogger(api.logger);
     let storage: PluginDatabase | undefined;
     let storageFailureCode = "STORAGE_NOT_READY";
 
@@ -90,11 +114,22 @@ const plugin = {
             upgradeBackupPath: join(config.stateDir, UPGRADE_BACKUP_FILENAME),
           });
           storageFailureCode = "STORAGE_NOT_READY";
-          api.logger.info(`idea-to-jira storage ready schema=${storage.health.schemaVersion}`);
+          logger.emit("INFO", {
+            timestamp: new Date().toISOString(),
+            component: "STORAGE",
+            eventType: "STORAGE_READY",
+            outcome: "SUCCEEDED",
+          });
         } catch {
           storage = undefined;
           storageFailureCode = "STORAGE_STARTUP_FAILED";
-          api.logger.error("idea-to-jira storage disabled code=STORAGE_STARTUP_FAILED");
+          logger.emit("ERROR", {
+            timestamp: new Date().toISOString(),
+            component: "STORAGE",
+            eventType: "STORAGE_STARTUP",
+            outcome: "FAILED",
+            errorCode: "STORAGE_STARTUP_FAILED",
+          });
         }
       },
       stop() {
@@ -116,7 +151,6 @@ const plugin = {
         context: PluginHookAgentContext,
       ): PluginHookBeforeAgentRunResult => {
         if (!storage) {
-          audit.record({ operation: "model_run", outcome: "rejected", code: storageFailureCode });
           return {
             outcome: "block",
             reason: storageFailureCode,
@@ -125,27 +159,49 @@ const plugin = {
           };
         }
 
+        const trace = createCorrelationContext();
         const requester = requesterFromAgentRun(event, context, config);
         if (!requester.ok) {
-          audit.record({ operation: "model_run", outcome: "rejected", code: requester.code });
+          const recorded = persistAudit(storage, logger, createAuditEvent({
+            actor: { kind: "SYSTEM" },
+            action: "SECURITY_DECISION",
+            target: { type: "SECURITY_BOUNDARY" },
+            outcome: "REJECTED",
+            code: requester.code,
+            links: trace,
+            retentionClass: "AUDIT_1Y",
+          }));
           return {
             outcome: "block",
-            reason: requester.code,
+            reason: recorded ? requester.code : "AUDIT_REQUIRED",
             message: "This request is unavailable.",
             category: "access_policy",
           };
         }
 
-        if (!limiter.consume(requester.context, "model_run").allowed) {
-          audit.record({ operation: "model_run", outcome: "rejected", code: "RATE_LIMITED" });
+        const actor = {
+          kind: "USER" as const,
+          refHash: hashAuditActorReference(requester.context.accountId, requester.context.senderId),
+        };
+        const allowed = limiter.consume(requester.context, "model_run").allowed;
+        const code = allowed ? "POLICY_OK" : "RATE_LIMITED";
+        const recorded = persistAudit(storage, logger, createAuditEvent({
+          actor,
+          action: "SECURITY_DECISION",
+          target: { type: "SECURITY_BOUNDARY" },
+          outcome: allowed ? "ALLOWED" : "REJECTED",
+          code,
+          links: trace,
+          retentionClass: "AUDIT_1Y",
+        }));
+        if (!recorded || !allowed) {
           return {
             outcome: "block",
-            reason: "RATE_LIMITED",
-            message: "This request is temporarily unavailable.",
-            category: "rate_limit",
+            reason: recorded ? code : "AUDIT_REQUIRED",
+            message: allowed ? "This request is unavailable." : "This request is temporarily unavailable.",
+            category: allowed ? "access_policy" : "rate_limit",
           };
         }
-        audit.record({ operation: "model_run", outcome: "allowed", code: "POLICY_OK" });
         return { outcome: "pass" };
       },
       { priority: 100 },
@@ -163,25 +219,59 @@ const plugin = {
           description: "Validate and normalize a draft Feature without writing to Jira.",
           parameters,
           async execute(_toolCallId: string, input: unknown) {
+            const trace = createCorrelationContext();
+            const actor = {
+              kind: "USER" as const,
+              refHash: hashAuditActorReference(requester.context.accountId, requester.context.senderId),
+            };
             try {
-              if (!storage) throw new Error(storageFailureCode);
+              if (!storage) throw new SafeError("STORAGE_NOT_READY", false);
               requireRateLimit(limiter, requester.context, "validate_draft");
               assertPayloadWithinLimit(input, config);
               assertCreateDisabled(config);
-              audit.record({ operation: "validate_draft", outcome: "allowed", code: "POLICY_OK" });
+              if (!persistAudit(storage, logger, createAuditEvent({
+                actor,
+                action: "SECURITY_DECISION",
+                target: { type: "SECURITY_BOUNDARY" },
+                outcome: "ALLOWED",
+                code: "POLICY_OK",
+                links: trace,
+                retentionClass: "AUDIT_1Y",
+              }))) throw new SafeError("AUDIT_REQUIRED", false);
 
               const draft = validateDraftForRequester(requester.context, input as IdeaInput, drafts);
-              audit.record({ operation: "validate_draft", outcome: "succeeded", code: "DRAFT_VALID" });
+              if (!persistAudit(storage, logger, createAuditEvent({
+                actor,
+                action: "DRAFT_TRANSITION",
+                target: { type: "DRAFT" },
+                outcome: "SUCCEEDED",
+                code: "DRAFT_VALID",
+                links: trace,
+                retentionClass: "AUDIT_1Y",
+              }))) throw new SafeError("AUDIT_REQUIRED", false);
               return {
                 content: [{ type: "text" as const, text: JSON.stringify(draft) }],
                 details: draft,
               };
             } catch (error) {
-              const code = error instanceof Error && /^[A-Z_]+$/.test(error.message)
-                ? error.message
-                : "DRAFT_INVALID";
-              audit.record({ operation: "validate_draft", outcome: "failed", code });
-              throw error;
+              const code = error instanceof SafeError
+                ? error.code
+                : error instanceof Error && isSafeErrorCode(error.message)
+                  ? error.message
+                  : "DRAFT_INVALID";
+              const activeStorage = storage;
+              if (activeStorage && code !== "AUDIT_REQUIRED" && code !== "AUDIT_APPEND_FAILED") {
+                persistAudit(activeStorage, logger, createAuditEvent({
+                  actor,
+                  action: "DRAFT_TRANSITION",
+                  target: { type: "DRAFT" },
+                  outcome: "FAILED",
+                  code,
+                  links: trace,
+                  retentionClass: "AUDIT_1Y",
+                }));
+              }
+              throw new SafeError(code, code === "RATE_LIMITED", { cause: error });
             }
           },
         };

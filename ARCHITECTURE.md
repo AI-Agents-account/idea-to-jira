@@ -433,7 +433,7 @@ stateDiagram-v2
 | Duplicate result/decision | Plugin | SQLite | Привязаны к Draft version и сроку актуальности |
 | Posting operation | Plugin | SQLite | Unique idempotency key + state machine |
 | Jira issue | Jira | Jira Server | Подтверждается только валидным Jira response/reconciliation |
-| Audit events | Plugin | Append-only SQLite/export | IDs, hashes, outcomes; без секретов и полных descriptions |
+| Audit events | Plugin | Append-only SQLite/export | Versioned IDs, hashes, outcomes и retention metadata; без секретов и полных descriptions; контракт — `docs/AUDIT_OBSERVABILITY.md` |
 | Model auth profiles | OpenClaw | `data/state` | OAuth/API credentials вне Git и plugin DB |
 | OAuth auth-profile encryption key | OpenClaw | `OPENCLAW_AUTH_PROFILE_SECRET_DIR` | Отдельный persistent mount `/home/node/.config/openclaw`; восстанавливается вместе с auth profiles, не входит в Git |
 
@@ -538,6 +538,10 @@ idea-to-jira/
 │       │   ├── index.ts            # plugin, typed input hook и context-gated tool
 │       │   ├── config.ts           # единый immutable effective config + startup validation
 │       │   ├── runtime/            # requester context, policy/rate limit, private state root
+│       │   ├── audit/              # typed envelope, append-only writer, atomic boundary, sanitized export
+│       │   ├── security/           # centralized drop-by-default redaction
+│       │   ├── errors/             # bounded safe taxonomy; internal cause не сериализуется
+│       │   ├── observability/      # correlation, structured logs, bounded metrics/alert boundary
 │       │   ├── domain/idea.ts      # текущие TypeScript-типы Draft
 │       │   ├── workflow/
 │       │   │   └── draft-service.ts # нормализация и typed validation
@@ -554,7 +558,7 @@ idea-to-jira/
 └── compose.yaml                    # Gateway/CLI, volumes и hardening
 ```
 
-По мере реализации новые сервисы плагина должны оставаться узкими и тестируемыми: RBAC, Draft repository/state machine, Catalog loader, duplicate search, Jira mapper/client, operation repository, reconciliation, notifications и audit. Их нельзя заменять одной универсальной «выполнить действие» функцией с model-defined payload.
+По мере реализации новые сервисы плагина должны оставаться узкими и тестируемыми: RBAC, Draft repository/state machine, Catalog loader, duplicate search, Jira mapper/client, operation repository, reconciliation и notifications. Критичные мутации обязаны проходить через `AuditedCriticalOperation`, чтобы state transition и audit insert были одной DB transaction. Их нельзя заменять одной универсальной «выполнить действие» функцией с model-defined payload.
 
 ## 14. Архитектурные инварианты приёмки
 

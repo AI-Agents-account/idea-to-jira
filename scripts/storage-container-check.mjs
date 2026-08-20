@@ -32,7 +32,7 @@ const row = storage.repositories.transaction(({ sql }) =>
   sql.prepare("SELECT telegram_sender_id FROM users WHERE id = ?").get("container-check-user"),
 );
 if (row?.telegram_sender_id !== "123456789") throw new Error("STORAGE_RESTART_CHECK_FAILED");
-if (storage.health.schemaVersion !== 1) throw new Error("STORAGE_SCHEMA_CHECK_FAILED");
+if (storage.health.schemaVersion !== 2) throw new Error("STORAGE_SCHEMA_CHECK_FAILED");
 if (mode(stateDir) !== expectedDirectoryMode || mode(databasePath) !== expectedFileMode) {
   throw new Error("STORAGE_MODE_CHECK_FAILED");
 }
@@ -40,4 +40,4 @@ assertRuntimeOwner(stateDir);
 assertRuntimeOwner(databasePath);
 storage.close();
 
-console.log("storage-container-check: schema=1 journal=wal modes=private restart=ok");
+console.log("storage-container-check: schema=2 journal=wal modes=private restart=ok");
