@@ -1,3 +1,5 @@
+ARG OPENCLAW_VERSION=2026.7.1-2
+
 FROM node:24.19.0-bookworm-slim AS plugin-build
 
 WORKDIR /src
@@ -8,7 +10,6 @@ COPY packages/idea-to-jira-plugin packages/idea-to-jira-plugin
 RUN npm run build
 
 # Keep the deployment on an explicit reviewed OpenClaw release.
-ARG OPENCLAW_VERSION=2026.7.1-2
 FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 
 USER root

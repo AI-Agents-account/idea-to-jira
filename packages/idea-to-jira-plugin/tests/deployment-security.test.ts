@@ -45,6 +45,7 @@ test("target-container storage verification is wired into the image and CI", asy
   const dockerfile = await text("Dockerfile");
   const workflow = await text(".github/workflows/ci.yaml");
   const storageCheck = await text("scripts/storage-container-check.mjs");
+  assert.match(dockerfile, /^ARG OPENCLAW_VERSION=2026\.7\.1-2\s+FROM node:/);
   assert.match(dockerfile, /scripts\/storage-container-check\.mjs/);
   assert.match(workflow, /Verify SQLite durability and mount permissions in target container/);
   assert.match(workflow, /docker run --rm --read-only/);
