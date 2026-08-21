@@ -29,15 +29,19 @@ test("model policy trusts server admission and contains no role lookup or denial
   }
 });
 
-test("plugin registers only before_agent_run for free-form admission", () => {
+test("plugin registers channel-dispatch and agent-run gates for free-form admission", () => {
   const indexSource = readRepositoryFile("packages/idea-to-jira-plugin/src/index.ts");
   const requesterSource = readRepositoryFile("packages/idea-to-jira-plugin/src/runtime/requester-context.ts");
   const roleSource = readRepositoryFile("packages/idea-to-jira-plugin/src/runtime/conversation-role-gate.ts");
-  const registeredAgentHooks = [...indexSource.matchAll(/api\.on\("(before_agent_[^"]+)"/g)]
+  const registeredGateHooks = [...indexSource.matchAll(/api\.on\("(before_dispatch|before_agent_[^"]+)"/g)]
     .map((match) => match[1]);
 
-  assert.equal(registeredAgentHooks.length, 2);
-  assert.equal(registeredAgentHooks.every((name) => name === "before_agent_run"), true);
+  assert.deepEqual(registeredGateHooks, [
+    "before_dispatch",
+    "before_agent_run",
+    "before_dispatch",
+    "before_agent_run",
+  ]);
   assert.equal(indexSource.includes("before_agent_reply"), false);
   assert.equal(requesterSource.includes("before_agent_reply"), false);
   assert.equal(roleSource.includes("before_agent_reply"), false);

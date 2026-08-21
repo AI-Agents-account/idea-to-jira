@@ -9,7 +9,12 @@ import {
   requireRateLimit,
 } from "./runtime/policy.js";
 import { CONVERSATION_ROLE_REPLIES } from "./runtime/conversation-role-gate.js";
-import { requesterFromAgentRun, requesterFromToolContext, type TrustedRequesterContext } from "./runtime/requester-context.js";
+import {
+  requesterFromAgentRun,
+  requesterFromBeforeDispatch,
+  requesterFromToolContext,
+  type TrustedRequesterContext,
+} from "./runtime/requester-context.js";
 import { JiraFailure } from "./jira/types.js";
 import {
   beginServiceRuntime,
@@ -31,6 +36,9 @@ import type {
   PluginHookAgentContext,
   PluginHookBeforeAgentRunEvent,
   PluginHookBeforeAgentRunResult,
+  PluginHookBeforeDispatchContext,
+  PluginHookBeforeDispatchEvent,
+  PluginHookBeforeDispatchResult,
 } from "openclaw/plugin-sdk/types";
 import { Type } from "typebox";
 
@@ -190,6 +198,16 @@ function persistAudit(
 
 function registerStartupDisabledGate(api: OpenClawPluginApi, code: string): void {
   api.logger.error(`idea-to-jira startup disabled code=${code}`);
+  api.on("before_dispatch", (
+    event: PluginHookBeforeDispatchEvent,
+    context: PluginHookBeforeDispatchContext,
+  ): PluginHookBeforeDispatchResult => {
+    const sessionKey = context.sessionKey ?? event.sessionKey;
+    if (event.channel !== "telegram" || (sessionKey && !sessionKey.startsWith("agent:idea-mvp:"))) {
+      return { handled: false };
+    }
+    return { handled: true, text: CONVERSATION_ROLE_REPLIES.UNAVAILABLE };
+  }, { priority: 1_000 });
   api.on("before_agent_run", (): PluginHookBeforeAgentRunResult => ({
     outcome: "block",
     reason: code,
@@ -200,7 +218,7 @@ function registerStartupDisabledGate(api: OpenClawPluginApi, code: string): void
 
 function logRuntimeDiagnostic(
   api: OpenClawPluginApi,
-  surface: "before_agent_run" | "tool_execute",
+  surface: "before_dispatch" | "before_agent_run" | "tool_execute",
   status: ServiceRuntimeStatus,
 ): void {
   try {
@@ -338,6 +356,70 @@ const plugin = {
         jiraMetadataHash: active?.jiraWorkflow?.status().metadataHash ?? null,
       });
     }, { scope: "operator.read" });
+
+    api.on("before_dispatch", (
+      event: PluginHookBeforeDispatchEvent,
+      context: PluginHookBeforeDispatchContext,
+    ): PluginHookBeforeDispatchResult => {
+      const runtime = getServiceRuntime();
+      if (!runtime) {
+        const requester = requesterFromBeforeDispatch(event, context, config);
+        if (!requester.ok && requester.code === "AGENT_DENIED") return { handled: false };
+        logRuntimeDiagnostic(api, "before_dispatch", getServiceRuntimeStatus());
+        return { handled: true, text: CONVERSATION_ROLE_REPLIES.UNAVAILABLE };
+      }
+      const requester = requesterFromBeforeDispatch(event, context, runtime.config);
+      if (!requester.ok) {
+        // A global dispatch hook must not claim traffic routed to another agent.
+        if (requester.code === "AGENT_DENIED") return { handled: false };
+        persistAudit(
+          runtime.storage,
+          runtime.auditWriter,
+          logger,
+          createAuditEvent({
+            actor: { kind: "SYSTEM" },
+            action: "SECURITY_DECISION",
+            target: { type: "SECURITY_BOUNDARY" },
+            outcome: "REJECTED",
+            code: requester.code,
+            links: createCorrelationContext(),
+            retentionClass: "AUDIT_1Y",
+          }),
+        );
+        return { handled: true, text: CONVERSATION_ROLE_REPLIES.UNAVAILABLE };
+      }
+      let decision;
+      try {
+        decision = runtime.accessService.authorizeConversation(requester.context);
+      } catch {
+        return { handled: true, text: CONVERSATION_ROLE_REPLIES.UNAVAILABLE };
+      }
+      if (decision.allowed) return { handled: false };
+      const message = decision.state === "ROLE_STALE"
+        ? CONVERSATION_ROLE_REPLIES.UNAVAILABLE
+        : CONVERSATION_ROLE_REPLIES[decision.state];
+      const recorded = persistAudit(
+        runtime.storage,
+        runtime.auditWriter,
+        logger,
+        createAuditEvent({
+          actor: {
+            kind: "USER",
+            refHash: hashAuditActorReference(requester.context.accountId, requester.context.senderId),
+          },
+          action: "SECURITY_DECISION",
+          target: { type: "SECURITY_BOUNDARY" },
+          outcome: "REJECTED",
+          code: `CONVERSATION_ROLE_${decision.state}`,
+          links: createCorrelationContext(),
+          retentionClass: "AUDIT_1Y",
+        }),
+      );
+      return {
+        handled: true,
+        text: recorded ? message : CONVERSATION_ROLE_REPLIES.UNAVAILABLE,
+      };
+    }, { priority: 1_000 });
 
     api.on("before_agent_run", (
       event: PluginHookBeforeAgentRunEvent,

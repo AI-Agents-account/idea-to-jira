@@ -34,7 +34,7 @@ Stages 01–05 дают безопасный локальный контур, к
 
 1. OpenClaw Telegram channel/account используют `dmPolicy: "open"`, `allowFrom: ["*"]`, `groupPolicy: "disabled"`.
 2. Native/text core-command parsing выключен; `TELEGRAM_PILOT_SENDER_ID` ограничивает remaining directive/owner authorization и controlled smoke, а plugin effective config не использует его как requester allowlist.
-3. `before_agent_run`, command и tool contexts принимают только `telegram` account `default`, agent `idea-mvp`, numeric direct peer destination и user trigger; Guest free-form блокируется до модели.
+3. `before_dispatch`, `before_agent_run`, command и tool contexts принимают только `telegram` account `default`, agent `idea-mvp`, numeric direct peer destination и user trigger; Guest free-form блокируется до модели.
 4. Agent tool allowlist остаётся exact и tools скрыты/отклонены до role gate; media audio understanding явно disabled.
 5. Jira `writeMode` остаётся manifest `const: "disabled"`; runtime использует `DisabledJiraIssueClient`, не получает Jira credential и не содержит create tool/transport.
 6. `readiness:pilot` проверяет effective OpenClaw/plugin boundaries, model route, Catalog checksum, disabled Jira adapter и storage health, не вызывая Telegram, OpenAI или Jira.

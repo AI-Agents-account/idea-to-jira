@@ -1,5 +1,10 @@
 import type { OpenClawPluginToolContext, PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
-import type { PluginHookAgentContext, PluginHookBeforeAgentRunEvent } from "openclaw/plugin-sdk/types";
+import type {
+  PluginHookAgentContext,
+  PluginHookBeforeAgentRunEvent,
+  PluginHookBeforeDispatchContext,
+  PluginHookBeforeDispatchEvent,
+} from "openclaw/plugin-sdk/types";
 
 import type { EffectiveConfig } from "../config.js";
 
@@ -132,6 +137,34 @@ export function requesterFromAgentRun(
       accountId: event.accountId,
       senderId: event.senderId ?? context.senderId,
       chatId: context.chatId ?? context.channelId ?? context.channel,
+    },
+    config,
+  );
+}
+
+
+/**
+ * Uses the channel dispatch boundary, which runs before command fall-through can
+ * start an agent turn. The canonical session key supplies the routed agent and
+ * the resolved conversation id supplies the private-DM destination.
+ */
+export function requesterFromBeforeDispatch(
+  event: PluginHookBeforeDispatchEvent,
+  context: PluginHookBeforeDispatchContext,
+  config: EffectiveConfig,
+): RequesterContextResult {
+  const sessionKey = normalized(context.sessionKey ?? event.sessionKey);
+  const sessionParts = sessionKey?.split(":") ?? [];
+  const agentId = sessionParts[0] === "agent" ? sessionParts[1] : undefined;
+  return validateRequesterFacts(
+    {
+      agentId,
+      trigger: "user",
+      channelId: event.channel ?? context.channelId,
+      accountId: context.accountId,
+      senderId: event.senderId ?? context.senderId,
+      chatId: context.conversationId,
+      threadId: event.isGroup === true ? "group" : undefined,
     },
     config,
   );

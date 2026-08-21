@@ -12,7 +12,7 @@
 - строгая нормализация/валидация, bounded question policy и детерминированный JC-004 formatter из восьми секций;
 - pure fail-closed completeness/readiness evaluator с versioned Catalog/transcript/metadata/duplicate/operation proofs и без transport;
 - единая startup-валидация runtime-конфигурации: Telegram account/channel, фиксированный Jira scope, protected env refs, Catalog schema/checksum, allowlist, STT, rate/retention limits и runtime paths;
-- fail-closed `before_agent_run` gate и tool-factory gate по trusted OpenClaw context: только user-triggered Telegram DM, agent `idea-mvp`, canonical Telegram account `default`, numeric sender и destination, равный sender;
+- fail-closed `before_dispatch` gate с `before_agent_run` defense in depth и tool-factory gate по trusted OpenClaw context: только user-triggered Telegram DM, agent `idea-mvp`, canonical Telegram account `default`, numeric sender и destination, равный sender;
 - process-local token-bucket interface, payload limit и fail-closed security gates;
 - versioned typed audit envelope, append-only SQLite writer, атомарный audited-operation boundary, safe error taxonomy и централизованная drop-by-default redaction;
 - structured log contract, bounded metric/alert interfaces, раздельные local correlation IDs, retention metadata и access-controlled sanitized audit export;

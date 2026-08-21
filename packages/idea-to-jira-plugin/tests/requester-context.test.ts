@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { OpenClawPluginToolContext, PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
-import type { PluginHookAgentContext, PluginHookBeforeAgentRunEvent } from "openclaw/plugin-sdk/types";
+import type {
+  PluginHookAgentContext,
+  PluginHookBeforeAgentRunEvent,
+  PluginHookBeforeDispatchContext,
+  PluginHookBeforeDispatchEvent,
+} from "openclaw/plugin-sdk/types";
 
 import {
   requesterFromAgentRun,
+  requesterFromBeforeDispatch,
   requesterFromCommandContext,
   requesterFromToolContext,
   validateRequesterFacts,
@@ -121,5 +127,36 @@ test("before_agent_run adapter requires a direct user trigger", () => {
   assert.deepEqual(requesterFromAgentRun(event, { ...context, trigger: "heartbeat" }, config), {
     ok: false,
     code: "TRIGGER_DENIED",
+  });
+});
+
+
+test("before_dispatch adapter binds the routed agent and private-DM destination", () => {
+  const event = {
+    content: "untrusted prompt",
+    channel: "telegram",
+    sessionKey: "agent:idea-mvp:telegram:direct:123456789",
+    senderId: "123456789",
+    isGroup: false,
+  } satisfies PluginHookBeforeDispatchEvent;
+  const context = {
+    channelId: "telegram",
+    accountId: "default",
+    conversationId: "123456789",
+    sessionKey: event.sessionKey,
+    senderId: "123456789",
+  } satisfies PluginHookBeforeDispatchContext;
+  assert.equal(requesterFromBeforeDispatch(event, context, config).ok, true);
+  assert.deepEqual(requesterFromBeforeDispatch({ ...event, isGroup: true }, context, config), {
+    ok: false,
+    code: "THREAD_DENIED",
+  });
+  assert.deepEqual(requesterFromBeforeDispatch(
+    { ...event, sessionKey: "agent:main:telegram:direct:123456789" },
+    { ...context, sessionKey: "agent:main:telegram:direct:123456789" },
+    config,
+  ), {
+    ok: false,
+    code: "AGENT_DENIED",
   });
 });

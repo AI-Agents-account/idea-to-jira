@@ -13,6 +13,9 @@ import type {
   PluginHookAgentContext,
   PluginHookBeforeAgentRunEvent,
   PluginHookBeforeAgentRunResult,
+  PluginHookBeforeDispatchContext,
+  PluginHookBeforeDispatchEvent,
+  PluginHookBeforeDispatchResult,
 } from "openclaw/plugin-sdk/types";
 
 import plugin from "../src/index.js";
@@ -38,6 +41,16 @@ interface RuntimeStatusPayload {
 type RuntimeStatusHandler = (options: {
   readonly respond: (ok: boolean, payload: unknown) => void;
 }) => void;
+
+type BeforeAgentRunHandler = (
+  event: PluginHookBeforeAgentRunEvent,
+  context: PluginHookAgentContext,
+) => PluginHookBeforeAgentRunResult;
+
+type BeforeDispatchHandler = (
+  event: PluginHookBeforeDispatchEvent,
+  context: PluginHookBeforeDispatchContext,
+) => PluginHookBeforeDispatchResult;
 
 function invokeRuntimeStatus(handler: RuntimeStatusHandler | undefined): RuntimeStatusPayload {
   if (!handler) throw new Error("runtime status method was not registered");
@@ -89,7 +102,8 @@ test("storage service gates requests until schema health succeeds and closes cle
   const info: string[] = [];
   const errors: string[] = [];
   let service: OpenClawPluginService | undefined;
-  let beforeAgentRun: ((event: PluginHookBeforeAgentRunEvent, context: PluginHookAgentContext) => PluginHookBeforeAgentRunResult) | undefined;
+  let beforeAgentRun: BeforeAgentRunHandler | undefined;
+  let beforeDispatch: BeforeDispatchHandler | undefined;
   let toolFactory: ((context: OpenClawPluginToolContext) => {
     execute(toolCallId: string, input: unknown): Promise<unknown>;
   } | null) | undefined;
@@ -102,9 +116,10 @@ test("storage service gates requests until schema health succeeds and closes cle
       error(message: string) { errors.push(message); },
     },
     registerService(value: OpenClawPluginService) { service = value; },
-    on(name: string, handler: typeof beforeAgentRun) {
-      assert.equal(name, "before_agent_run");
-      beforeAgentRun = handler;
+    on(name: string, handler: unknown) {
+      if (name === "before_agent_run") beforeAgentRun = handler as BeforeAgentRunHandler;
+      else if (name === "before_dispatch") beforeDispatch = handler as BeforeDispatchHandler;
+      else assert.fail(`unexpected hook: ${name}`);
     },
     registerTool(factory: typeof toolFactory) { toolFactory = factory; },
     registerCommand() {},
@@ -119,6 +134,7 @@ test("storage service gates requests until schema health succeeds and closes cle
   plugin.register(api);
   assert.ok(service);
   assert.ok(beforeAgentRun);
+  assert.ok(beforeDispatch);
   assert.ok(toolFactory);
   assert.deepEqual(invokeRuntimeStatus(runtimeStatusHandler), {
     schemaVersion: 1,
@@ -214,26 +230,25 @@ test("storage service gates requests until schema health succeeds and closes cle
   assert.equal(afterStop.reason, "STORAGE_NOT_READY");
 });
 
-test("before_agent_run is the sole role gate and BLOCKED overrides Business Admin before the model", async (t) => {
+test("before_dispatch blocks Guest text and BLOCKED overrides Business Admin before the model", async (t) => {
   resetServiceRuntimeForTest();
   t.after(resetServiceRuntimeForTest);
   setRuntimeEnvironment(t);
   const { rawConfig } = configuredFixture();
   let service: OpenClawPluginService | undefined;
-  let beforeAgentRun: ((
-    event: PluginHookBeforeAgentRunEvent,
-    context: PluginHookAgentContext,
-  ) => PluginHookBeforeAgentRunResult) | undefined;
+  let beforeAgentRun: BeforeAgentRunHandler | undefined;
+  let beforeDispatch: BeforeDispatchHandler | undefined;
   const hookNames: string[] = [];
 
   const api = {
     pluginConfig: rawConfig,
     logger: { info() {}, warn() {}, error() {} },
     registerService(value: OpenClawPluginService) { service = value; },
-    on(name: string, handler: typeof beforeAgentRun) {
+    on(name: string, handler: unknown) {
       hookNames.push(name);
-      assert.equal(name, "before_agent_run");
-      beforeAgentRun = handler;
+      if (name === "before_agent_run") beforeAgentRun = handler as BeforeAgentRunHandler;
+      else if (name === "before_dispatch") beforeDispatch = handler as BeforeDispatchHandler;
+      else assert.fail(`unexpected hook: ${name}`);
     },
     registerTool() {},
     registerCommand() {},
@@ -242,9 +257,10 @@ test("before_agent_run is the sole role gate and BLOCKED overrides Business Admi
   } as unknown as OpenClawPluginApi;
 
   plugin.register(api);
-  assert.deepEqual(hookNames, ["before_agent_run"]);
+  assert.deepEqual(hookNames, ["before_dispatch", "before_agent_run"]);
   assert.ok(service);
   assert.ok(beforeAgentRun);
+  assert.ok(beforeDispatch);
   const registeredService = service;
   const gate = beforeAgentRun;
   await registeredService.start({} as never);
@@ -265,6 +281,24 @@ test("before_agent_run is the sole role gate and BLOCKED overrides Business Admi
 
   const guestEvent = { ...event, senderId: "222222222" } satisfies PluginHookBeforeAgentRunEvent;
   const guestContext = { ...context, chatId: "222222222" } satisfies PluginHookAgentContext;
+  const guestSessionKey = "agent:idea-mvp:telegram:direct:222222222";
+  const dispatchGuest = beforeDispatch({
+    content: "ordinary untrusted text",
+    channel: "telegram",
+    sessionKey: guestSessionKey,
+    senderId: "222222222",
+    isGroup: false,
+  }, {
+    channelId: "telegram",
+    accountId: "default",
+    conversationId: "222222222",
+    sessionKey: guestSessionKey,
+    senderId: "222222222",
+  });
+  assert.deepEqual(dispatchGuest, {
+    handled: true,
+    text: CONVERSATION_ROLE_REPLIES.GUEST,
+  });
   assert.deepEqual(gate(guestEvent, guestContext), {
     outcome: "block",
     reason: "GUEST",
@@ -274,6 +308,20 @@ test("before_agent_run is the sole role gate and BLOCKED overrides Business Admi
   assert.match(CONVERSATION_ROLE_REPLIES.GUEST, /\/request_access/);
 
   assert.deepEqual(gate(event, context), { outcome: "pass" });
+  const adminSessionKey = "agent:idea-mvp:telegram:direct:123456789";
+  assert.deepEqual(beforeDispatch({
+    content: "ordinary authorized text",
+    channel: "telegram",
+    sessionKey: adminSessionKey,
+    senderId: "123456789",
+    isGroup: false,
+  }, {
+    channelId: "telegram",
+    accountId: "default",
+    conversationId: "123456789",
+    sessionKey: adminSessionKey,
+    senderId: "123456789",
+  }), { handled: false });
 
   const runtime = getServiceRuntime();
   assert.ok(runtime);
@@ -301,6 +349,22 @@ test("before_agent_run is the sole role gate and BLOCKED overrides Business Admi
     message: CONVERSATION_ROLE_REPLIES.BLOCKED,
     category: "access_policy",
   });
+  assert.deepEqual(beforeDispatch({
+    content: "ordinary blocked text",
+    channel: "telegram",
+    sessionKey: adminSessionKey,
+    senderId: "123456789",
+    isGroup: false,
+  }, {
+    channelId: "telegram",
+    accountId: "default",
+    conversationId: "123456789",
+    sessionKey: adminSessionKey,
+    senderId: "123456789",
+  }), {
+    handled: true,
+    text: CONVERSATION_ROLE_REPLIES.BLOCKED,
+  });
   await registeredService.stop?.({} as never);
 });
 
@@ -312,18 +376,14 @@ test("agent-runtime pre-warm registration does not displace the started Gateway 
 
   function registerCopy(): {
     service: OpenClawPluginService;
-    beforeAgentRun: (
-      event: PluginHookBeforeAgentRunEvent,
-      context: PluginHookAgentContext,
-    ) => PluginHookBeforeAgentRunResult;
+    beforeAgentRun: BeforeAgentRunHandler;
+    beforeDispatch: BeforeDispatchHandler;
     runtimeStatusHandler: RuntimeStatusHandler;
     info: string[];
   } {
     let service: OpenClawPluginService | undefined;
-    let beforeAgentRun: ((
-      event: PluginHookBeforeAgentRunEvent,
-      context: PluginHookAgentContext,
-    ) => PluginHookBeforeAgentRunResult) | undefined;
+    let beforeAgentRun: BeforeAgentRunHandler | undefined;
+    let beforeDispatch: BeforeDispatchHandler | undefined;
     let runtimeStatusHandler: RuntimeStatusHandler | undefined;
     const info: string[] = [];
     const api = {
@@ -334,9 +394,10 @@ test("agent-runtime pre-warm registration does not displace the started Gateway 
         error() {},
       },
       registerService(value: OpenClawPluginService) { service = value; },
-      on(name: string, handler: typeof beforeAgentRun) {
-        assert.equal(name, "before_agent_run");
-        beforeAgentRun = handler;
+      on(name: string, handler: unknown) {
+        if (name === "before_agent_run") beforeAgentRun = handler as BeforeAgentRunHandler;
+        else if (name === "before_dispatch") beforeDispatch = handler as BeforeDispatchHandler;
+        else assert.fail(`unexpected hook: ${name}`);
       },
       registerTool() {},
       registerCommand() {},
@@ -348,8 +409,9 @@ test("agent-runtime pre-warm registration does not displace the started Gateway 
     plugin.register(api);
     assert.ok(service);
     assert.ok(beforeAgentRun);
+    assert.ok(beforeDispatch);
     assert.ok(runtimeStatusHandler);
-    return { service, beforeAgentRun, runtimeStatusHandler, info };
+    return { service, beforeAgentRun, beforeDispatch, runtimeStatusHandler, info };
   }
 
   const gatewayCopy = registerCopy();
@@ -420,10 +482,8 @@ test("storage startup failure is visible, bounded, and leaves every entry point 
   const info: string[] = [];
   const errors: string[] = [];
   let service: OpenClawPluginService | undefined;
-  let beforeAgentRun: ((
-    event: PluginHookBeforeAgentRunEvent,
-    context: PluginHookAgentContext,
-  ) => PluginHookBeforeAgentRunResult) | undefined;
+  let beforeAgentRun: BeforeAgentRunHandler | undefined;
+  let beforeDispatch: BeforeDispatchHandler | undefined;
   let runtimeStatusHandler: RuntimeStatusHandler | undefined;
 
   const api = {
@@ -433,9 +493,10 @@ test("storage startup failure is visible, bounded, and leaves every entry point 
       error(message: string) { errors.push(message); },
     },
     registerService(value: OpenClawPluginService) { service = value; },
-    on(name: string, handler: typeof beforeAgentRun) {
-      assert.equal(name, "before_agent_run");
-      beforeAgentRun = handler;
+    on(name: string, handler: unknown) {
+      if (name === "before_agent_run") beforeAgentRun = handler as BeforeAgentRunHandler;
+      else if (name === "before_dispatch") beforeDispatch = handler as BeforeDispatchHandler;
+      else assert.fail(`unexpected hook: ${name}`);
     },
     registerTool() {},
     registerCommand() {},
@@ -448,6 +509,7 @@ test("storage startup failure is visible, bounded, and leaves every entry point 
   plugin.register(api);
   assert.ok(service);
   assert.ok(beforeAgentRun);
+  assert.ok(beforeDispatch);
   const registeredService = service;
   await assert.rejects(
     async () => registeredService.start({} as never),
