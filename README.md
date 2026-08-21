@@ -1,6 +1,6 @@
 # Idea-to-Jira
 
-**Статус: production-oriented scaffold, не готовый MVP; Jira write отключён, реализованы typed draft validation и Stage-02 SQLite foundation.**
+**Статус: production-oriented scaffold, не готовый MVP; Jira write отключён, реализованы typed draft validation, Stage-02 SQLite foundation и Stage-03 audit/redaction baseline.**
 
 Репозиторий задаёт ориентированный на production каркас выделенного Telegram-бота и выделенного агента OpenClaw. Целевая система должна помогать автору структурировать продуктовую идею, безопасно проверять роль и дубли и создавать Jira `Feature` в фиксированном контуре. Сейчас этот процесс существует только как требования и целевая архитектура: запуск контейнера не даёт готовый пользовательский MVP и не должен получать production-трафик.
 
@@ -11,9 +11,11 @@
 - проверка обязательных строк, обрезка пробелов, дедупликация списков и детерминированная сборка Draft для `Feature`;
 - единая startup-валидация runtime-конфигурации: Telegram account/channel, фиксированный Jira scope, protected env refs, Catalog schema/checksum, allowlist, STT, rate/retention limits и runtime paths;
 - fail-closed `before_agent_run` gate и tool-factory gate по trusted OpenClaw context: только user-triggered Telegram DM, agent/account `idea-mvp`, numeric sender и destination, равный sender;
-- process-local token-bucket interface, payload limit и санитаризированные audit codes без пользовательского текста, destinations и credentials;
+- process-local token-bucket interface, payload limit и fail-closed security gates;
+- versioned typed audit envelope, append-only SQLite writer, атомарный audited-operation boundary, safe error taxonomy и централизованная drop-by-default redaction;
+- structured log contract, bounded metric/alert interfaces, раздельные local correlation IDs, retention metadata и access-controlled sanitized audit export;
 - явный create-disabled readiness signal и `DisabledJiraIssueClient`: Jira write остаётся недоступен;
-- plugin-owned SQLite schema v1, transactional checksum-guarded migrations, WAL/FK/FULL durability policy, private file modes, startup consistency gate, unit-of-work и online backup primitive;
+- plugin-owned SQLite schema v2, transactional checksum-guarded migrations, WAL/FK/FULL durability policy, private file modes, startup consistency gate, unit-of-work и online backup primitive;
 - unit/security/config/deployment/storage-тесты, TypeScript type-check, JSON/OpenClaw validators и CI;
 - Dockerfile и Compose-каркас выделенного OpenClaw Gateway/CLI с постоянными томами и ограничениями контейнера;
 - OpenClaw-конфигурация с отдельным агентом, Telegram DM, peer-scoped сессиями и allowlist из единственного реализованного plugin tool;
@@ -24,15 +26,15 @@
 - полноценный Telegram-диалог и repository implementation поверх уже созданных таблиц версионированного Draft;
 - приём и локальная транскрипция voice через Whisper `medium`, показ и коррекция транскрипта;
 - Guest/Creator/Business Admin RBAC, заявки, выдача и отзыв доступа;
-- domain-level audit/RBAC/catalog/posting repositories, retention execution и production backup scheduling/operations;
+- RBAC/catalog/posting repositories, retention execution, production alert routing и backup scheduling/operations;
 - проверяемый импорт и обновление Knowledge Catalog;
 - bounded duplicate search и решение Creator по найденным кандидатам;
 - READY predicate, атомарный operation claim и идемпотентность;
 - Jira payload mapper по allowlist, POST, обработка ответа и ручная reconciliation состояния `UNKNOWN`;
 - уведомления автору, Business Admin и Product Owner;
-- production monitoring, alerts, runbooks, security/integration/E2E и performance evidence.
+- production monitoring backend/dashboards, destination routing, runbooks, security/integration/E2E и performance evidence.
 
-Целевые возможности и принятые ограничения описаны в [бизнес-требованиях](docs/BUSINESS_REQUIREMENTS.md), [функциональных требованиях](docs/FUNCTIONAL_REQUIREMENTS.md), [нефункциональных требованиях](docs/NON_FUNCTIONAL_REQUIREMENTS.md), [контракте Jira create](docs/JIRA_CREATE_CONTRACT.md) и [журнале решений](docs/DECISIONS.md). Storage contract, migration/recovery и проверка backup описаны в [руководстве по persistence](docs/STORAGE.md). Текущее и целевое состояние разведены в [архитектуре](ARCHITECTURE.md). Полная последовательность оставшейся реализации и quality gates собрана в [декомпозиции задач](docs/tasks/README.md).
+Целевые возможности и принятые ограничения описаны в [бизнес-требованиях](docs/BUSINESS_REQUIREMENTS.md), [функциональных требованиях](docs/FUNCTIONAL_REQUIREMENTS.md), [нефункциональных требованиях](docs/NON_FUNCTIONAL_REQUIREMENTS.md), [контракте Jira create](docs/JIRA_CREATE_CONTRACT.md) и [журнале решений](docs/DECISIONS.md). Storage contract, migration/recovery и проверка backup описаны в [руководстве по persistence](docs/STORAGE.md), а audit/redaction/telemetry contract — в [Stage-03 baseline](docs/AUDIT_OBSERVABILITY.md). Текущее и целевое состояние разведены в [архитектуре](ARCHITECTURE.md). Полная последовательность оставшейся реализации и quality gates собрана в [декомпозиции задач](docs/tasks/README.md).
 
 ## Роли целевой системы
 
@@ -54,7 +56,7 @@
 | `package.json`, `package-lock.json` | Корневой private npm workspace, scripts и зафиксированное дерево зависимостей. |
 | `packages/idea-to-jira-plugin/` | Исходники, manifest, TypeScript-конфигурация и unit-тесты плагина. |
 | `config/openclaw.json5` | Выделенный агент, Telegram account/binding, tool allowlist, plugin loading и token-auth Gateway. |
-| `docs/` | Нормативные бизнес-, функциональные, нефункциональные требования, решения, Jira create и storage contracts. |
+| `docs/` | Нормативные требования, решения, Jira create, storage и audit/observability contracts. |
 | `knowledge/catalog.md` | Неполная fail-closed заготовка каталога, не production-источник маршрутов. |
 | `compose.yaml`, `Dockerfile` | Сборка плагина и изолированный запуск Gateway/CLI. |
 | `data/state/` | Игнорируемое Git постоянное состояние OpenClaw, включая auth profiles. |

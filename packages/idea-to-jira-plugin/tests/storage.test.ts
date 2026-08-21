@@ -78,12 +78,12 @@ function assertRuntimeOwner(path: string): void {
   assert.equal(statSync(path).gid, process.getgid());
 }
 
-test("fresh schema v1 is deterministic and fixes canonical persistent enums", () => {
+test("fresh storage schema v2 is deterministic and fixes canonical persistent enums", () => {
   const stateDir = stateDirectory("fresh");
   const storage = openPluginDatabase({ stateDir });
   assert.deepEqual(storage.health, {
     healthy: true,
-    schemaVersion: 1,
+    schemaVersion: 2,
     quickCheck: "ok",
     foreignKeyViolations: 0,
   });
@@ -278,8 +278,8 @@ test("migration runner upgrades v0, is repeat-safe and rejects changed history",
   const path = join(stateDirectory("upgrade"), "upgrade.sqlite3");
   const database = new DatabaseSync(path);
   assert.equal(runMigrations(database, []), 0);
-  assert.equal(runMigrations(database, migrations), 1);
-  assert.equal(runMigrations(database, migrations), 1);
+  assert.equal(runMigrations(database, migrations), 2);
+  assert.equal(runMigrations(database, migrations), 2);
   database.prepare("UPDATE schema_migrations SET checksum = ? WHERE version = 1").run(HASH_B);
   assert.throws(
     () => runMigrations(database, migrations),
@@ -327,8 +327,8 @@ test("an untracked application table is rejected without adopting or mutating it
 test("future and partially recorded schema versions fail closed", () => {
   const future = new DatabaseSync(join(stateDirectory("future"), "future.sqlite3"));
   runMigrations(future, migrations);
-  future.prepare("INSERT INTO schema_migrations(version, name, checksum) VALUES (2, ?, ?)").run("future", HASH_B);
-  future.exec("PRAGMA user_version = 2");
+  future.prepare("INSERT INTO schema_migrations(version, name, checksum) VALUES (3, ?, ?)").run("future", HASH_B);
+  future.exec("PRAGMA user_version = 3");
   assert.throws(
     () => runMigrations(future, migrations),
     (error) => error instanceof MigrationError && error.code === "MIGRATION_FUTURE_SCHEMA",
@@ -354,14 +354,14 @@ test("non-empty schema upgrade requires and verifies a consistent pre-upgrade ba
   await storage.createConsistentBackup(backupPath);
   storage.close();
 
-  const secondMigration = defineMigration(2, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;");
-  const registry = [...migrations, secondMigration];
+  const thirdMigration = defineMigration(3, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;");
+  const registry = [...migrations, thirdMigration];
   assert.throws(
     () => openPluginDatabase({ stateDir, migrationRegistry: registry }),
     /STORAGE_UPGRADE_BACKUP_REQUIRED/,
   );
   const upgraded = openPluginDatabase({ stateDir, migrationRegistry: registry, upgradeBackupPath: backupPath });
-  assert.equal(upgraded.health.schemaVersion, 2);
+  assert.equal(upgraded.health.schemaVersion, 3);
   const marker = withSql(upgraded, (sql) => sql.prepare(
     "SELECT count(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'upgrade_marker'",
   ).get()) as { count: number };
@@ -381,7 +381,7 @@ test("tampered pre-upgrade backup is rejected by the production startup path", a
   tampered.close();
   const registry = [
     ...migrations,
-    defineMigration(2, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;"),
+    defineMigration(3, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;"),
   ];
   assert.throws(
     () => openPluginDatabase({ stateDir, migrationRegistry: registry, upgradeBackupPath: backupPath }),

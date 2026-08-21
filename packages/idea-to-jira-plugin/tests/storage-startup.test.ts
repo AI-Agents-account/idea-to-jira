@@ -16,6 +16,7 @@ import type {
 } from "openclaw/plugin-sdk/types";
 
 import plugin from "../src/index.js";
+import { SafeError } from "../src/errors/safe-error.js";
 import { catalogSha256, catalogText, validEnvironment, validRawConfig } from "./config-fixture.js";
 
 function configuredFixture(): { rawConfig: Record<string, unknown>; stateDir: string } {
@@ -96,7 +97,8 @@ test("storage service gates requests until schema health succeeds and closes cle
   const afterStart = beforeAgentRun(event, context);
   assert.ok(afterStart);
   assert.equal(afterStart.outcome, "pass");
-  assert.equal(info.filter((message) => message === "idea-to-jira storage ready schema=1").length, 1);
+  assert.equal(info.map((message) => JSON.parse(message) as { eventType?: string })
+    .filter((event) => event.eventType === "STORAGE_READY").length, 1);
   assert.deepEqual(errors, []);
   const tool = toolFactory({
     agentId: "idea-mvp",
@@ -114,7 +116,7 @@ test("storage service gates requests until schema health succeeds and closes cle
       problem: "Problem",
       desiredOutcome: "Outcome",
     }),
-    /STORAGE_NOT_READY/,
+    (error) => error instanceof SafeError && error.code === "STORAGE_NOT_READY",
   );
   const afterStop = beforeAgentRun(event, context);
   assert.ok(afterStop);

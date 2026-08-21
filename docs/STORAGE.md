@@ -25,9 +25,9 @@ The effective `stateDir` comes from validated server-side configuration. It is n
 
 Container deployments must ensure the bind-mounted `data/plugin-state` path is owned by the UID/GID used by the target image. CI discovers that identity from the built image instead of assuming a host UID.
 
-## 3. Schema v1
+## 3. Storage schema v2
 
-Migration `001_initial_schema` creates:
+Migration `001_initial_schema` creates the domain schema v1:
 
 - `users`, `access_requests`, `role_grants`;
 - `drafts` plus immutable `draft_versions`;
@@ -53,6 +53,8 @@ Important invariants are database-enforced:
 - checks on status transitions that require timestamps or a Jira key.
 
 Payload hashes and local operation IDs are local consistency keys only. They are not Jira identities and never justify an automatic retry from `UNKNOWN`.
+
+Migration `002_audit_observability_baseline` advances the storage schema to version 2. It adds versioned audit correlation/correction/retention fields and record-level retention classes without changing legacy actor/outcome values. Existing audit rows are marked `LEGACY`, keep unknown correlation fields `NULL`, and retain their original actor/outcome. New application writes go only through `SqliteAuditWriter`; `AuditedCriticalOperation` makes a critical mutation and audit insert one transaction. The full contract is in [`AUDIT_OBSERVABILITY.md`](AUDIT_OBSERVABILITY.md).
 
 ## 4. Migration contract
 
@@ -134,4 +136,4 @@ docker run --rm --read-only \
   --entrypoint node "$image" /app/scripts/storage-container-check.mjs
 ```
 
-The automated suite covers fresh install, v0 upgrade, mandatory/tampered pre-upgrade backup, repeat execution, interrupted migration rollback, checksum drift, future/partial schema rejection, head/version FK integrity, constraints, CAS, concurrent claim, abrupt-process WAL restart, production-path restore, corruption, ownership and private modes.
+The automated suite covers fresh install, v0/v1 upgrade, mandatory/tampered pre-upgrade backup, repeat execution, interrupted migration rollback, checksum drift, future/partial schema rejection, audit history preservation, head/version FK integrity, constraints, CAS, concurrent claim, atomic audited failure, abrupt-process WAL restart, production-path restore, corruption, ownership and private modes.
