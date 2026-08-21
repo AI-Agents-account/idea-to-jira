@@ -80,7 +80,7 @@ test("typed command boundary uses trusted context and fixed admin destinations",
   assert.equal(requestCommand.requireAuth, false);
   assert.equal(accessCommand.requireAuth, false);
 
-  const requested = await requestCommand.handler(commandContext("222222222"));
+  const requested = await requestCommand.handler(commandContext("123456789"));
   assert.equal(text(requested), "Access request submitted. Business Admins were notified.");
   assert.deepEqual(sends.map((send) => send.to), config.telegram.adminSenderIds);
   assert.equal(sends.every((send) => send.accountId === "idea-mvp"), true);
@@ -97,8 +97,8 @@ test("typed command boundary uses trusted context and fixed admin destinations",
     agentId: "idea-mvp",
     channelId: "telegram",
     accountId: "idea-mvp",
-    senderId: "222222222",
-    chatId: "222222222",
+    senderId: "123456789",
+    chatId: "123456789",
   }).userState, "PENDING");
 
   const substitutedDestination = await accessCommand.handler(commandContext(

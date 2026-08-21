@@ -1,6 +1,6 @@
 # Idea-to-Jira
 
-**Статус: production-oriented scaffold, не готовый MVP; Jira write отключён, реализованы Stage-01 runtime/security, Stage-02 SQLite, Stage-03 audit/redaction, Stage-04 RBAC и Stage-05 versioned Draft/readiness foundation.**
+**Статус: production-oriented scaffold и controlled Stage-05A text-pilot candidate, не production MVP; Jira write отключён, реализованы Stage-01—05 foundation и fail-closed pilot boundaries.**
 
 Репозиторий задаёт ориентированный на production каркас выделенного Telegram-бота и выделенного агента OpenClaw. Целевая система должна помогать автору структурировать продуктовую идею, безопасно проверять роль и дубли и создавать Jira `Feature` в фиксированном контуре. Сейчас этот процесс существует только как требования и целевая архитектура: запуск контейнера не даёт готовый пользовательский MVP и не должен получать production-трафик.
 
@@ -23,6 +23,8 @@
 - unit/security/config/deployment/storage-тесты, TypeScript type-check, JSON/OpenClaw validators и CI;
 - Dockerfile и Compose-каркас выделенного OpenClaw Gateway/CLI с постоянными томами и ограничениями контейнера;
 - OpenClaw-конфигурация с отдельным агентом, Telegram DM, peer-scoped сессиями и allowlist только из пяти реализованных plugin tools;
+- Stage-05A boundary: DM allowlist одного protected numeric sender, повторная plugin-side sender check, explicit audio-understanding disable и offline/live-local readiness;
+- pilot runtime не инжектирует Jira credential; disabled adapter и manifest/config gate исключают Jira POST;
 - заготовка Knowledge Catalog, намеренно неполная и не пригодная для production-маршрутизации.
 
 ## Что ещё не реализовано
@@ -36,8 +38,9 @@
 - Jira payload mapper по allowlist, POST, обработка ответа и ручная reconciliation состояния `UNKNOWN`;
 - уведомления автору, Business Admin и Product Owner;
 - production monitoring backend/dashboards, destination routing, runbooks, security/integration/E2E и performance evidence.
+- byte-level media rejection до model run: подтверждённый SDK `before_agent_run` context не содержит typed attachment discriminator, поэтому pilot использует disabled audio understanding и operational text-only policy;
 
-Целевые возможности и принятые ограничения описаны в [бизнес-требованиях](docs/BUSINESS_REQUIREMENTS.md), [функциональных требованиях](docs/FUNCTIONAL_REQUIREMENTS.md), [нефункциональных требованиях](docs/NON_FUNCTIONAL_REQUIREMENTS.md), [контракте Jira create](docs/JIRA_CREATE_CONTRACT.md) и [журнале решений](docs/DECISIONS.md). Storage contract, migration/recovery и проверка backup описаны в [руководстве по persistence](docs/STORAGE.md), audit/redaction/telemetry contract — в [Stage-03 baseline](docs/AUDIT_OBSERVABILITY.md), RBAC/access lifecycle — в [Stage-04 contract](docs/RBAC_ACCESS.md), а фактические Draft schema/provenance/CAS/readiness/tool contracts — в [Stage-05 contract](docs/DRAFT_VERSIONING.md). Текущее и целевое состояние разведены в [архитектуре](ARCHITECTURE.md). Полная последовательность оставшейся реализации и quality gates собрана в [декомпозиции задач](docs/tasks/README.md).
+Целевые возможности и принятые ограничения описаны в [бизнес-требованиях](docs/BUSINESS_REQUIREMENTS.md), [функциональных требованиях](docs/FUNCTIONAL_REQUIREMENTS.md), [нефункциональных требованиях](docs/NON_FUNCTIONAL_REQUIREMENTS.md), [контракте Jira create](docs/JIRA_CREATE_CONTRACT.md) и [журнале решений](docs/DECISIONS.md). Storage contract, migration/recovery и проверка backup описаны в [руководстве по persistence](docs/STORAGE.md), audit/redaction/telemetry contract — в [Stage-03 baseline](docs/AUDIT_OBSERVABILITY.md), RBAC/access lifecycle — в [Stage-04 contract](docs/RBAC_ACCESS.md), а фактические Draft schema/provenance/CAS/readiness/tool contracts — в [Stage-05 contract](docs/DRAFT_VERSIONING.md). Текущее и целевое состояние разведены в [архитектуре](ARCHITECTURE.md). Полная последовательность оставшейся реализации и quality gates собрана в [декомпозиции задач](docs/tasks/README.md). Контролируемый внешний smoke выполняется только по [Stage-05A runbook](docs/LIVE_TEXT_PILOT.md).
 
 ## Роли целевой системы
 
@@ -110,12 +113,14 @@ cp .env.example .env
 | `OPENCLAW_AUTH_PROFILE_SECRET_DIR` | Host-каталог с локальным encryption key для OAuth-backed auth profiles; по умолчанию `./data/auth-profile-secrets`. Должен монтироваться и в Gateway, и в CLI, храниться вне Git и резервироваться отдельно от config/state. |
 | `OPENCLAW_GATEWAY_TOKEN` | Новый длинный случайный token только для этого Gateway. |
 | `TELEGRAM_BOT_TOKEN` | Token отдельного бота от BotFather. |
+| `TELEGRAM_PILOT_SENDER_ID` | Единственный numeric Telegram sender ID для controlled DM pilot; тот же ID повторно проверяет plugin runtime. |
+| `OPENAI_MODEL` | Reviewed canonical route `openai/<available-model>` для агента. Placeholder из `.env.example` не live-ready. |
 | `JIRA_BASE_URL` | HTTPS origin целевой Jira без публикации внутреннего адреса в документации. |
-| `JIRA_TOKEN` | Runtime credential Jira с минимальными правами. Сейчас plugin его не использует, потому что Jira write отключён, но Compose требует непустое значение. |
-| `BUSINESS_ADMIN_TELEGRAM_IDS` | Разделённые запятыми numeric sender IDs доверенных администраторов. Startup требует корректный непустой allowlist; только эти host-derived IDs могут выполнять Stage-04 access/role transitions. |
+| `JIRA_TOKEN` | **Не задавать для Stage-05A.** Compose не инжектирует Jira credential; pilot не делает Jira GET/POST. |
+| `BUSINESS_ADMIN_TELEGRAM_IDS` | Разделённые запятыми numeric sender IDs доверенных администраторов. Controlled one-actor pilot требует включить `TELEGRAM_PILOT_SENDER_ID`; только allowlisted host-derived IDs могут выполнять Stage-04 transitions. |
 | `PRODUCT_OWNER_TELEGRAM_IDS` | Server-side allowlist numeric Telegram destinations для будущих PO notifications; startup проверяет формат и непустое значение. |
 
-Jira project/type (`FPF`/`18100`, `Feature`/`11500`), Catalog path/checksum и `writeMode: "disabled"` закреплены server-side в plugin config и не имеют environment override.
+Jira project/type (`FPF`/`18100`, `Feature`/`11500`), Catalog path/checksum и `writeMode: "disabled"` закреплены server-side в plugin config и не имеют environment override. Для pilot оставьте `JIRA_BASE_URL=https://jira.invalid` и не добавляйте Jira credential.
 
 Сгенерировать Gateway token можно локально одним из способов:
 
@@ -186,15 +191,10 @@ docker compose run --rm openclaw-cli models list --provider openai
 
 API key — отдельная схема OpenAI Platform с usage-based оплатой; она не использует квоту подписки ChatGPT. Выбирайте её осознанно и храните key как runtime secret. Новые конфигурации и модели используют provider/model prefix `openai/*`; `openai-codex:*` — устаревший формат идентификаторов auth profile, а `openai-codex/*` — legacy model route. Для миграции существующего состояния применяется официальный `openclaw doctor --fix`, но не запускайте исправление без backup и просмотра плана изменений.
 
-Текущий `config/openclaw.json5` не закрепляет primary model: успешная авторизация сама по себе не доказывает готовность модели для агента. После `models list --provider openai` выберите доступный canonical ID `openai/<model>` и добавьте его в host-файл `config/openclaw.json5`, например:
+Текущий `config/openclaw.json5` закрепляет primary model через deployment value `OPENAI_MODEL`; успешная авторизация сама по себе всё равно не доказывает entitlement. После `models list --provider openai` выберите доступный canonical ID и задайте в `.env`:
 
-```json5
-agents: {
-  defaults: { model: { primary: "openai/<model-from-list>" } },
-  list: [
-    // существующая конфигурация агента idea-mvp
-  ],
-},
+```bash
+OPENAI_MODEL=openai/<model-from-list>
 ```
 
 Затем перезапустите Gateway и проверьте effective route:
@@ -204,7 +204,7 @@ docker compose restart openclaw-gateway
 docker compose run --rm openclaw-cli models status
 ```
 
-Не используйте `models set` как основной способ для этого Compose: `config/openclaw.json5` намеренно монтируется read-only, поэтому конфигурацию модели следует менять в отслеживаемом host-файле и проверять отдельным deployment review.
+Не используйте `models set` как основной способ для этого Compose: `config/openclaw.json5` намеренно монтируется read-only, а route выбирается deployment environment и проверяется отдельным review/readiness.
 
 ### 4. Собрать и запустить Gateway
 
@@ -222,6 +222,7 @@ Gateway публикуется только на loopback: `127.0.0.1:${OPENCLAW
 docker compose logs --tail=100 openclaw-gateway
 docker compose ps
 docker compose exec openclaw-gateway node /app/scripts/healthcheck.mjs
+docker compose exec openclaw-gateway node /app/scripts/pilot-readiness.mjs
 curl --fail --silent --show-error http://127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}/healthz
 # Ожидаемо non-zero, пока Jira write закрыт:
 docker compose exec openclaw-gateway node /app/scripts/create-readiness.mjs
@@ -233,7 +234,7 @@ docker compose exec openclaw-gateway node /app/scripts/create-readiness.mjs
 docker compose logs --follow --tail=100 openclaw-gateway
 ```
 
-Healthcheck подтверждает только liveness HTTP endpoint Gateway. Отдельный `create-readiness.mjs` намеренно возвращает `CREATE_DISABLED` и non-zero до реализации всех create preconditions; liveness не подменяет create-readiness.
+Healthcheck подтверждает только liveness HTTP endpoint Gateway. `pilot-readiness.mjs` локально проверяет controlled DM/model/tool/storage/Jira-disabled boundaries без внешнего вызова. Отдельный `create-readiness.mjs` намеренно возвращает `CREATE_DISABLED` и non-zero до реализации всех create preconditions; pilot readiness не подменяет create-readiness.
 
 ## Безопасность и граница запуска
 

@@ -9,6 +9,7 @@ export type RequesterContextErrorCode =
   | "CHANNEL_DENIED"
   | "ACCOUNT_DENIED"
   | "SENDER_MISSING"
+  | "SENDER_DENIED"
   | "DESTINATION_DENIED"
   | "THREAD_DENIED";
 
@@ -54,6 +55,7 @@ export function validateRequesterFacts(facts: RequesterFacts, config: EffectiveC
   if (channelId !== config.telegram.channelId) return { ok: false, code: "CHANNEL_DENIED" };
   if (accountId !== config.telegram.accountId) return { ok: false, code: "ACCOUNT_DENIED" };
   if (!numericTelegramId(senderId)) return { ok: false, code: "SENDER_MISSING" };
+  if (senderId !== config.telegram.pilotSenderId) return { ok: false, code: "SENDER_DENIED" };
   if (!numericTelegramId(chatId) || chatId !== senderId) return { ok: false, code: "DESTINATION_DENIED" };
   if (facts.threadId !== undefined && String(facts.threadId).trim().length > 0) {
     return { ok: false, code: "THREAD_DENIED" };

@@ -34,6 +34,7 @@ export interface EffectiveConfig {
   readonly telegram: {
     readonly channelId: "telegram";
     readonly accountId: "idea-mvp";
+    readonly pilotSenderId: string;
     readonly adminSenderIds: readonly string[];
   };
   readonly notifications: {
@@ -89,7 +90,7 @@ const ROOT_KEYS = [
   "retention",
   "stateDir",
 ] as const;
-const TELEGRAM_KEYS = ["channelId", "accountId", "adminSenderIdsEnv"] as const;
+const TELEGRAM_KEYS = ["channelId", "accountId", "pilotSenderIdEnv", "adminSenderIdsEnv"] as const;
 const NOTIFICATION_KEYS = ["productOwnerSenderIdsEnv"] as const;
 const JIRA_KEYS = [
   "originEnv",
@@ -213,11 +214,13 @@ export function loadEffectiveConfig(
 
   const originEnv = string(jira.originEnv);
   const tokenEnv = string(jira.tokenEnv);
+  const pilotSenderIdEnv = string(telegram.pilotSenderIdEnv);
   const adminsEnv = string(telegram.adminSenderIdsEnv);
   const productOwnerRoutesEnv = string(notifications.productOwnerSenderIdsEnv);
   if (
     originEnv !== "JIRA_BASE_URL" ||
     tokenEnv !== "JIRA_TOKEN" ||
+    pilotSenderIdEnv !== "TELEGRAM_PILOT_SENDER_ID" ||
     adminsEnv !== "BUSINESS_ADMIN_TELEGRAM_IDS" ||
     productOwnerRoutesEnv !== "PRODUCT_OWNER_TELEGRAM_IDS"
   ) {
@@ -225,12 +228,13 @@ export function loadEffectiveConfig(
   }
 
   const origin = parseHttpsOrigin(environment[originEnv]);
-  const tokenPresent = Boolean(environment[tokenEnv]?.trim());
+  const pilotSenderId = string(environment[pilotSenderIdEnv]);
   const adminSenderIds = parseTelegramIds(environment[adminsEnv]);
   const productOwnerSenderIds = parseTelegramIds(environment[productOwnerRoutesEnv]);
-  if (!origin || !tokenPresent || !adminSenderIds || !productOwnerSenderIds) {
+  if (!origin || !pilotSenderId || !numericTelegramId(pilotSenderId) || !adminSenderIds || !productOwnerSenderIds) {
     return { ok: false, code: "SECRET_REF_MISSING" };
   }
+  if (!adminSenderIds.includes(pilotSenderId)) return { ok: false, code: "CONFIG_INVALID" };
 
   const catalogPath = string(catalog.path);
   const catalogSha256 = string(catalog.sha256)?.toLowerCase();
@@ -268,6 +272,7 @@ export function loadEffectiveConfig(
       telegram: Object.freeze({
         channelId: "telegram",
         accountId: "idea-mvp",
+        pilotSenderId,
         adminSenderIds,
       }),
       notifications: Object.freeze({ productOwnerSenderIds }),

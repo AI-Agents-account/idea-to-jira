@@ -28,11 +28,25 @@ OPENCLAW_CONFIG_PATH="$PWD/config/openclaw.json5" \
 IDEA_TO_JIRA_PLUGIN_PATH="$PWD/packages/idea-to-jira-plugin" \
 OPENCLAW_GATEWAY_TOKEN="preflight-placeholder-gateway-token" \
 TELEGRAM_BOT_TOKEN="preflight-placeholder-telegram-token" \
+TELEGRAM_PILOT_SENDER_ID="123456789" \
+OPENAI_MODEL="openai/pilot-structural-fixture" \
 JIRA_BASE_URL="https://jira.example.test" \
-JIRA_TOKEN="preflight-placeholder-jira-token" \
 BUSINESS_ADMIN_TELEGRAM_IDS="123456789" \
 PRODUCT_OWNER_TELEGRAM_IDS="987654321" \
 npm exec -- openclaw config validate
+
+env -u JIRA_TOKEN \
+HOME="$validation_home" \
+OPENCLAW_CONFIG_PATH="$PWD/config/openclaw.json5" \
+IDEA_TO_JIRA_PLUGIN_PATH="$PWD/packages/idea-to-jira-plugin" \
+OPENCLAW_GATEWAY_TOKEN="***" \
+TELEGRAM_BOT_TOKEN="***" \
+TELEGRAM_PILOT_SENDER_ID="123456789" \
+OPENAI_MODEL="openai/pilot-structural-fixture" \
+JIRA_BASE_URL="https://jira.example.test" \
+BUSINESS_ADMIN_TELEGRAM_IDS="123456789" \
+PRODUCT_OWNER_TELEGRAM_IDS="987654321" \
+npm run verify:pilot-structure
 
 if [ ! -f .env ]; then
   echo "warning: .env is missing; validating Compose with placeholders from .env.example" >&2

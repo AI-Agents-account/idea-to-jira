@@ -32,13 +32,16 @@ Idea-to-Jira — выделенный Telegram-ассистент, которы�
 | OpenClaw plugin | Startup config validation, `before_agent_run`/tool-context gates и пять узких Draft/access tools | Дополнительные узкие Catalog/duplicate/posting lifecycle surfaces |
 | Draft | Schema v1, per-field provenance, immutable versions, CAS, owner isolation, active limit, JC-004 formatter и pure readiness в SQLite | Диалоговая orchestration, live proof integrations и retention execution |
 | Jira | Fail-closed adapter: write всегда запрещён | Bounded duplicate search, whitelist mapper, POST и manual reconciliation |
-| Доступ | Channel/account/agent/user-trigger/DM/destination fail-closed gate; Guest/Creator/Business Admin lifecycle, CAS/anti-replay; own-Draft predicate используется каждым Draft tool | Active-Creator guard перед duplicate disclosure/claim/POST |
+| Доступ | Channel/account/agent/user-trigger/DM/destination fail-closed gate; controlled pilot дополнительно требует exact protected sender в OpenClaw allowlist и plugin runtime; Guest/Creator/Business Admin lifecycle, CAS/anti-replay; own-Draft predicate используется каждым Draft tool | Active-Creator guard перед duplicate disclosure/claim/POST |
+| Stage-05A pilot | Один Telegram DM sender, text-only operational scope, audio understanding disabled, local readiness, Jira credential/transport отсутствуют | Не является production/broad-beta gate; full lifecycle и voice deferred |
 | Knowledge Catalog | Неполная Markdown-заготовка | Версионированный, проверяемый и fail-closed каталог маршрутизации |
 | Voice | Не реализован | Локальный Whisper `medium`, показ и коррекция транскрипта |
 | Уведомления | Не реализованы | Идемпотентная доставка автору, Business Admin и Product Owner |
 | Наблюдаемость | Раздельные liveness/create-readiness signals и санитаризированные security audit codes | Structured logs, metrics, alerts, audit export и runbooks |
 
 Подтверждённый контракт закреплённой версии OpenClaw `2026.7.1-2`: `before_agent_run` передаёт host-derived `accountId`, `channelId`, `senderId`, а hook context — `agentId`, `trigger` и `chatId`; tool factory получает `agentId`, `messageChannel`, `agentAccountId`, `requesterSenderId` и `deliveryContext`. Параметры tool и текст модели не являются источником identity. Отсутствие любого обязательного поля, non-user trigger, thread/group route или несовпадение DM destination с sender приводит к отказу; эти варианты закреплены unit-тестами.
+
+Для Stage-05A установленный config API подтверждает `tools.media.audio.enabled: false`, но typed `before_agent_run` event не предоставляет attachment/media discriminator. Поэтому архитектура не выдумывает pre-model media hook: pilot допускает только текст по operational policy, а byte-level media rejection остаётся blocker до подтверждённого SDK boundary. Это не включает Stage-07 voice.
 
 ## 4. Контекст системы
 

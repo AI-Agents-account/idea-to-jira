@@ -24,6 +24,10 @@ test("manifest and host config expose only the Stage-05 typed Draft/access tools
   assert.equal(manifest.configSchema.properties.limits.properties.activeDrafts.maximum, 100);
 
   const openclawConfig = await text("config/openclaw.json5");
+  assert.match(openclawConfig, /dmPolicy: "allowlist"/);
+  assert.match(openclawConfig, /allowFrom: \["\$\{TELEGRAM_PILOT_SENDER_ID\}"\]/);
+  assert.doesNotMatch(openclawConfig, /dmPolicy: "open"|allowFrom: \["\*"\]/);
+  assert.match(openclawConfig, /audio: \{ enabled: false \}/);
   for (const tool of expected) {
     assert.equal(openclawConfig.split(`"${tool}"`).length - 1, 2);
   }
@@ -36,7 +40,9 @@ test("Compose maps only protected runtime values and keeps Gateway loopback-only
   const compose = await text("compose.yaml");
   assert.match(compose, /127\.0\.0\.1:\$\{OPENCLAW_GATEWAY_PORT:-18789\}:18789/);
   assert.match(compose, /JIRA_BASE_URL: \$\{JIRA_BASE_URL:\?/);
-  assert.match(compose, /JIRA_TOKEN: \$\{JIRA_TOKEN:\?/);
+  assert.doesNotMatch(compose, /JIRA_TOKEN:/);
+  assert.match(compose, /TELEGRAM_PILOT_SENDER_ID: \$\{TELEGRAM_PILOT_SENDER_ID:\?/);
+  assert.match(compose, /OPENAI_MODEL: \$\{OPENAI_MODEL:\?/);
   assert.match(compose, /BUSINESS_ADMIN_TELEGRAM_IDS: \$\{BUSINESS_ADMIN_TELEGRAM_IDS:\?/);
   assert.match(compose, /PRODUCT_OWNER_TELEGRAM_IDS: \$\{PRODUCT_OWNER_TELEGRAM_IDS:\?/);
   assert.doesNotMatch(compose, /JIRA_PROJECT_KEY|JIRA_ISSUE_TYPE_ID|KNOWLEDGE_CATALOG_PATH/);
@@ -62,10 +68,17 @@ test("target-container storage verification is wired into the image and CI", asy
 
 test("health and create-readiness are separate signals", async () => {
   const compose = await text("compose.yaml");
+  const dockerfile = await text("Dockerfile");
+  const workflow = await text(".github/workflows/ci.yaml");
   const packageJson = JSON.parse(await text("package.json"));
   assert.match(compose, /healthcheck\.mjs/);
   assert.equal(packageJson.scripts["readiness:create"], "node scripts/create-readiness.mjs");
   assert.equal(packageJson.scripts["verify:create-disabled"], "node scripts/create-readiness.mjs --expect-disabled");
+  assert.equal(packageJson.scripts["readiness:pilot"], "node scripts/pilot-readiness.mjs");
+  assert.equal(packageJson.scripts["verify:pilot-structure"], "node scripts/pilot-readiness.mjs --structural");
+  assert.match(dockerfile, /scripts\/pilot-readiness\.mjs/);
+  assert.match(workflow, /Verify Stage-05A pilot structure without external calls/);
+  assert.doesNotMatch(workflow, /JIRA_TOKEN:/);
 });
 
 test("healthcheck never prints configured URL credentials or raw exceptions", () => {

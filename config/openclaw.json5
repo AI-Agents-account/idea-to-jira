@@ -3,6 +3,9 @@
     defaults: {
       workspace: "/home/node/.openclaw/workspace",
       skipBootstrap: true,
+      model: {
+        primary: "${OPENAI_MODEL}",
+      },
     },
     list: [
       {
@@ -22,6 +25,11 @@
       },
     ],
   },
+  tools: {
+    media: {
+      audio: { enabled: false },
+    },
+  },
   session: {
     dmScope: "per-account-channel-peer",
   },
@@ -38,15 +46,15 @@
     telegram: {
       enabled: true,
       defaultAccount: "idea-mvp",
-      dmPolicy: "open",
-      allowFrom: ["*"],
+      dmPolicy: "allowlist",
+      allowFrom: ["${TELEGRAM_PILOT_SENDER_ID}"],
       groupPolicy: "disabled",
       accounts: {
         "idea-mvp": {
           enabled: true,
           botToken: "${TELEGRAM_BOT_TOKEN}",
-          dmPolicy: "open",
-          allowFrom: ["*"],
+          dmPolicy: "allowlist",
+          allowFrom: ["${TELEGRAM_PILOT_SENDER_ID}"],
           groupPolicy: "disabled",
         },
       },
@@ -69,6 +77,7 @@
           telegram: {
             channelId: "telegram",
             accountId: "idea-mvp",
+            pilotSenderIdEnv: "TELEGRAM_PILOT_SENDER_ID",
             adminSenderIdsEnv: "BUSINESS_ADMIN_TELEGRAM_IDS",
           },
           notifications: {

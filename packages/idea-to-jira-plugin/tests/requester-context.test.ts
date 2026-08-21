@@ -41,6 +41,10 @@ test("denies missing or ambiguous sender and non-DM destinations", () => {
     ok: false,
     code: "SENDER_MISSING",
   });
+  assert.deepEqual(validateRequesterFacts({ ...validFacts, senderId: "987654321", chatId: "987654321" }, config), {
+    ok: false,
+    code: "SENDER_DENIED",
+  });
   assert.deepEqual(validateRequesterFacts({ ...validFacts, chatId: "-100123456789" }, config), {
     ok: false,
     code: "DESTINATION_DENIED",
