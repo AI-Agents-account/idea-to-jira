@@ -2,7 +2,9 @@ import { readFile } from "node:fs/promises";
 
 const manifestCandidates = [
   process.env.IDEA_TO_JIRA_PLUGIN_MANIFEST,
-  "/app/extensions/idea-to-jira-plugin/openclaw.plugin.json",
+  process.env.IDEA_TO_JIRA_PLUGIN_PATH
+    ? `${process.env.IDEA_TO_JIRA_PLUGIN_PATH}/openclaw.plugin.json`
+    : "/opt/openclaw-plugins/idea-to-jira/openclaw.plugin.json",
   new URL("../packages/idea-to-jira-plugin/openclaw.plugin.json", import.meta.url),
 ].filter(Boolean);
 

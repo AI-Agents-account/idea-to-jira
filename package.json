@@ -20,6 +20,9 @@
     "readiness:create": "node scripts/create-readiness.mjs",
     "verify:create-disabled": "node scripts/create-readiness.mjs --expect-disabled",
     "readiness:pilot": "node scripts/pilot-readiness.mjs",
-    "verify:pilot-structure": "node scripts/pilot-readiness.mjs --structural"
+    "verify:pilot-structure": "node scripts/pilot-readiness.mjs --structural",
+    "verify:pilot-env": "node scripts/pilot-env-check.mjs .env",
+    "pilot:up": "sh scripts/pilot-up.sh",
+    "pilot:down": "docker compose --env-file .env down"
   }
 }

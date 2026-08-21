@@ -10,6 +10,7 @@ Stage 04 implements the local access-control boundary while Jira write remains d
 - opaque action references plus record-version CAS for deterministic anti-replay;
 - atomic access/role mutation and append-only audit writes in `criticalTransaction`;
 - reusable own-Draft and active-Creator authorization APIs for duplicate disclosure, operation claim, and the immediate pre-POST recheck;
+- deterministic `before_agent_run` interception: only an active Creator grant or a startup-validated non-blocked Business Admin reaches the model;
 - typed `/request_access` and `/access` handlers that bypass the LLM.
 
 Corporate SSO, Feature-specific approval, Business Admin host/OpenClaw access, and host control routes such as `/delete/disable` remain out of scope. This stage does not enable Jira POST.
@@ -20,12 +21,14 @@ Authorization keys are assembled only from OpenClaw-owned context:
 
 - agent `idea-mvp`;
 - channel `telegram`;
-- account `idea-mvp`;
+- canonical Telegram account `default` (the single `TELEGRAM_BOT_TOKEN` account);
 - user-triggered direct message;
 - numeric `senderId` equal to the direct-message destination;
 - no thread/topic.
 
 `PluginCommandContext.senderId`, channel/account, `from`/`to`, and thread fields are validated before a command reaches `AccessService`. On the confirmed Telegram native-command path, `senderId` is the plain numeric identity while both `from` and `to` must equal `telegram:<senderId>`; the adapter normalizes that verified binding back to the numeric access key. Command arguments, prompt text, username, display name, and opaque action references never establish actor identity. The Business Admin capability comes only from the startup-validated `BUSINESS_ADMIN_TELEGRAM_IDS` allowlist.
+
+Free-form turns are gated by the typed `before_agent_run` hook before model execution. The hook consumes OpenClaw's trusted `accountId`, `channelId`, `senderId`, direct-chat facts and authoritative access storage; it does not reconstruct identity from prompt text or usernames. `BLOCKED` always wins. Non-blocked Business Admins and users whose `CREATOR` state is backed by an `ACTIVE` Creator grant pass through. Guest, Pending, Suspended, Blocked, stale Creator, malformed identity, and storage failures are blocked without invoking the model; OpenClaw renders the bounded Russian policy message inside its standard block-response envelope. Native `/request_access` and `/access` commands are resolved by OpenClaw before this hook and retain their typed non-LLM handlers.
 
 The installed OpenClaw `2026.7.1-2` declarations were checked at the public `/plugin-sdk/core` command/runtime surface and the plugin registry surface represented by `/plugins/registry-types.d.ts`. The confirmed integration points are `OpenClawPluginApi.registerCommand`, `PluginCommandContext`, and `api.runtime.channel.outbound.loadAdapter(...).sendText(...)`.
 

@@ -6,10 +6,13 @@ x-openclaw-common: &openclaw-common
     context: .
     args:
       OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.7.1-2}
+  env_file:
+    - .env
   environment:
     HOME: /home/node
-    OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json5
-    IDEA_TO_JIRA_PLUGIN_PATH: /app/extensions/idea-to-jira-plugin
+    OPENCLAW_CONFIG_PATH: /home/node/config/openclaw.json5
+    IDEA_TO_JIRA_PLUGIN_PATH: /opt/openclaw-plugins/idea-to-jira
+    OPENCLAW_GATEWAY_PORT: "18789"
     OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?set OPENCLAW_GATEWAY_TOKEN in .env}
     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
     TELEGRAM_PILOT_SENDER_ID: ${TELEGRAM_PILOT_SENDER_ID:?set TELEGRAM_PILOT_SENDER_ID in .env}
@@ -18,12 +21,12 @@ x-openclaw-common: &openclaw-common
     BUSINESS_ADMIN_TELEGRAM_IDS: ${BUSINESS_ADMIN_TELEGRAM_IDS:?set BUSINESS_ADMIN_TELEGRAM_IDS in .env}
     PRODUCT_OWNER_TELEGRAM_IDS: ${PRODUCT_OWNER_TELEGRAM_IDS:?set PRODUCT_OWNER_TELEGRAM_IDS in .env}
   volumes:
-    - ./config/openclaw.json5:/home/node/.openclaw/openclaw.json5:ro
+    - ./data/config:/home/node/config
     - ./data/state:/home/node/.openclaw
     - ${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-./data/auth-profile-secrets}:/home/node/.config/openclaw
-    - ./data/workspace:/home/node/.openclaw/workspace
-    - ./data/plugin-state:/home/node/.openclaw/plugin-state
-    - ./knowledge:/home/node/.openclaw/workspace/knowledge:ro
+    - ./data/workspace:/home/node/workspace
+    - ./data/plugin-state:/home/node/plugin-state
+    - ./knowledge:/app/knowledge:ro
   read_only: true
   tmpfs:
     - /tmp:size=256m,mode=1777
@@ -50,8 +53,4 @@ services:
   openclaw-cli:
     <<: *openclaw-common
     profiles: ["cli"]
-    entrypoint: ["openclaw"]
     command: ["status"]
-    network_mode: "service:openclaw-gateway"
-    depends_on:
-      - openclaw-gateway

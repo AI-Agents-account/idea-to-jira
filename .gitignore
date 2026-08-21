@@ -20,6 +20,12 @@ data/**
 !data/state/.gitkeep
 !data/workspace/
 !data/workspace/.gitkeep
+!data/workspace/AGENTS.md
+!data/workspace/SOUL.md
+!data/workspace/IDENTITY.md
+!data/workspace/USER.md
+!data/workspace/TOOLS.md
+!data/workspace/HEARTBEAT.md
 !data/plugin-state/
 !data/plugin-state/.gitkeep
 

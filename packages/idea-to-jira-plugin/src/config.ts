@@ -33,7 +33,7 @@ export interface EffectiveConfig {
   readonly agentId: "idea-mvp";
   readonly telegram: {
     readonly channelId: "telegram";
-    readonly accountId: "idea-mvp";
+    readonly accountId: "default";
     readonly pilotSenderId: string;
     readonly adminSenderIds: readonly string[];
   };
@@ -195,7 +195,7 @@ export function loadEffectiveConfig(
   if (
     root.agentId !== "idea-mvp" ||
     telegram.channelId !== "telegram" ||
-    telegram.accountId !== "idea-mvp"
+    telegram.accountId !== "default"
   ) {
     return { ok: false, code: "CHANNEL_BINDING_INVALID" };
   }
@@ -271,7 +271,7 @@ export function loadEffectiveConfig(
       agentId: "idea-mvp",
       telegram: Object.freeze({
         channelId: "telegram",
-        accountId: "idea-mvp",
+        accountId: "default",
         pilotSenderId,
         adminSenderIds,
       }),

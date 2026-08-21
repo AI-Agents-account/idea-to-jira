@@ -12,7 +12,7 @@
 - строгая нормализация/валидация, bounded question policy и детерминированный JC-004 formatter из восьми секций;
 - pure fail-closed completeness/readiness evaluator с versioned Catalog/transcript/metadata/duplicate/operation proofs и без transport;
 - единая startup-валидация runtime-конфигурации: Telegram account/channel, фиксированный Jira scope, protected env refs, Catalog schema/checksum, allowlist, STT, rate/retention limits и runtime paths;
-- fail-closed `before_agent_run` gate и tool-factory gate по trusted OpenClaw context: только user-triggered Telegram DM, agent/account `idea-mvp`, numeric sender и destination, равный sender;
+- fail-closed `before_agent_run` gate и tool-factory gate по trusted OpenClaw context: только user-triggered Telegram DM, agent `idea-mvp`, canonical Telegram account `default`, numeric sender и destination, равный sender;
 - process-local token-bucket interface, payload limit и fail-closed security gates;
 - versioned typed audit envelope, append-only SQLite writer, атомарный audited-operation boundary, safe error taxonomy и централизованная drop-by-default redaction;
 - structured log contract, bounded metric/alert interfaces, раздельные local correlation IDs, retention metadata и access-controlled sanitized audit export;
@@ -144,6 +144,28 @@ mkdir -p data/state data/workspace data/plugin-state data/auth-profile-secrets
 
 `data/state` хранит OpenClaw state и auth profiles, а `data/auth-profile-secrets` — локальный encryption key для OAuth-токенов. Для восстановления OAuth нужны оба каталога; не переносите только один из них и не добавляйте их содержимое в Git.
 
+Compose передаёт весь `.env` непосредственно в Gateway и CLI-контейнеры через `env_file`. Поэтому `scripts/pilot-up.sh` и container entrypoint независимо отклоняют `JIRA_TOKEN` и `OPENAI_API_KEY`: Stage-05A использует только ChatGPT/Codex OAuth и не допускает Jira credential даже в пустом виде.
+
+### Однокомандный controlled pilot
+
+После заполнения `.env` запустите:
+
+```bash
+./scripts/pilot-up.sh
+```
+
+На хосте нужны только Docker и Docker Compose v2; локальные Node.js и npm не требуются. Скрипт проверяет Compose, собирает image, валидирует инжектированный environment внутри Node-enabled контейнера, поднимает Gateway, предлагает интерактивный OpenAI device-code OAuth при отсутствии сохранённого OAuth-профиля, перезапускает Gateway после входа и запускает health/pilot/create-disabled gates. При любой ошибке после старта Gateway автоматически останавливается. Повторный запуск использует OAuth-профиль из persistent mounts и не требует нового входа.
+
+Если Node.js/npm всё же установлены, доступен эквивалентный alias `npm run pilot:up`. Development preflight (`scripts/preflight.sh`) остаётся отдельной проверкой исходников и не требуется для операторского запуска уже проверенной ревизии.
+
+Остановка без удаления состояния:
+
+```bash
+npm run pilot:down
+```
+
+Команды ниже остаются детальной ручной процедурой и диагностическим справочником.
+
 ### 2. Проверить исходники и Compose
 
 ```bash
@@ -162,7 +184,7 @@ docker compose --env-file .env.example config --quiet
 
 ### 3. Авторизовать ChatGPT/OpenAI по подписке
 
-Официальная текущая схема OpenClaw использует provider `openai` и canonical model route `openai/*` как для ChatGPT/Codex subscription OAuth, так и для API-key профилей. Для headless Docker выполните device-code вход через предусмотренный сервис `openclaw-cli`:
+Официальная текущая схема OpenClaw использует provider `openai` и canonical model route `openai/*` как для ChatGPT/Codex subscription OAuth, так и для API-key профилей. `./scripts/pilot-up.sh` сам запускает device-code вход в уже поднятом Gateway, если сохранённый OAuth-профиль отсутствует. Для отдельного ручного входа используйте сервис `openclaw-cli`:
 
 ```bash
 docker compose run --rm openclaw-cli models auth login --provider openai --device-code
@@ -204,7 +226,7 @@ docker compose restart openclaw-gateway
 docker compose run --rm openclaw-cli models status
 ```
 
-Не используйте `models set` как основной способ для этого Compose: `config/openclaw.json5` намеренно монтируется read-only, а route выбирается deployment environment и проверяется отдельным review/readiness.
+Не используйте `models set` как основной способ выбора deployment route: launcher один раз создаёт writable runtime-копию `data/config/openclaw.json5` из reviewed `config/openclaw.json5`, чтобы OAuth мог безопасно создать lock/update metadata; route по-прежнему задаётся environment и проверяется readiness.
 
 ### 4. Собрать и запустить Gateway
 
@@ -214,7 +236,7 @@ docker compose up -d openclaw-gateway
 docker compose ps
 ```
 
-Gateway публикуется только на loopback: `127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}`. Root filesystem контейнера read-only, Linux capabilities сброшены, включён `no-new-privileges`; постоянные данные находятся в `./data/state`, `./data/workspace`, `./data/plugin-state` и каталоге `OPENCLAW_AUTH_PROFILE_SECRET_DIR`.
+Gateway публикуется только на loopback: `127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}`. Root filesystem контейнера read-only, Linux capabilities сброшены, включён `no-new-privileges`; постоянные данные находятся в `./data/config`, `./data/state`, `./data/workspace`, `./data/plugin-state` и каталоге `OPENCLAW_AUTH_PROFILE_SECRET_DIR`.
 
 ### 5. Посмотреть логи и health
 
@@ -234,7 +256,7 @@ docker compose exec openclaw-gateway node /app/scripts/create-readiness.mjs
 docker compose logs --follow --tail=100 openclaw-gateway
 ```
 
-Healthcheck подтверждает только liveness HTTP endpoint Gateway. `pilot-readiness.mjs` локально проверяет controlled DM/model/tool/storage/Jira-disabled boundaries без внешнего вызова. Отдельный `create-readiness.mjs` намеренно возвращает `CREATE_DISABLED` и non-zero до реализации всех create preconditions; pilot readiness не подменяет create-readiness.
+Healthcheck подтверждает только liveness HTTP endpoint Gateway. `pilot-readiness.mjs` локально проверяет controlled DM/model/tool/Jira-disabled boundaries и через authenticated loopback Gateway RPC требует `READY` именно от активного поколения plugin runtime с healthy storage; отдельное открытие SQLite не считается runtime-readiness. Скрипт не вызывает Telegram, OpenAI или Jira. Отдельный `create-readiness.mjs` намеренно возвращает `CREATE_DISABLED` и non-zero до реализации всех create preconditions; pilot readiness не подменяет create-readiness.
 
 ## Безопасность и граница запуска
 

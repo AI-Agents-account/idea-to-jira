@@ -10,7 +10,7 @@ export function validRawConfig(): Record<string, unknown> {
     agentId: "idea-mvp",
     telegram: {
       channelId: "telegram",
-      accountId: "idea-mvp",
+      accountId: "default",
       pilotSenderIdEnv: "TELEGRAM_PILOT_SENDER_ID",
       adminSenderIdsEnv: "BUSINESS_ADMIN_TELEGRAM_IDS",
     },

@@ -51,6 +51,7 @@ test("registered typed tools perform own-Draft create/read/CAS patch/cancel end 
     },
     registerTool(factory: (context: OpenClawPluginToolContext) => unknown) { factories.push(factory); },
     registerCommand() {},
+    registerGatewayMethod() {},
     runtime: { channel: { outbound: { loadAdapter: async () => undefined } } },
   } as unknown as OpenClawPluginApi;
 
@@ -63,7 +64,7 @@ test("registered typed tools perform own-Draft create/read/CAS patch/cancel end 
   const event = {
     prompt: "untrusted",
     messages: [],
-    accountId: "idea-mvp",
+    accountId: "default",
     channelId: "telegram",
     senderId: "123456789",
   } satisfies PluginHookBeforeAgentRunEvent;
@@ -78,9 +79,9 @@ test("registered typed tools perform own-Draft create/read/CAS patch/cancel end 
   const toolContext = {
     agentId: "idea-mvp",
     messageChannel: "telegram",
-    agentAccountId: "idea-mvp",
+    agentAccountId: "default",
     requesterSenderId: "123456789",
-    deliveryContext: { channel: "telegram", accountId: "idea-mvp", to: "123456789" },
+    deliveryContext: { channel: "telegram", accountId: "default", to: "123456789" },
   } as OpenClawPluginToolContext;
   const tools = new Map<string, { execute(id: string, input: unknown): Promise<{ details: unknown }> }>();
   for (const factory of factories) {

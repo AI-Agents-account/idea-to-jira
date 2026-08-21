@@ -17,7 +17,7 @@ const validFacts = {
   agentId: "idea-mvp",
   trigger: "user",
   channelId: "telegram",
-  accountId: "idea-mvp",
+  accountId: "default",
   senderId: "123456789",
   chatId: "123456789",
 };
@@ -59,7 +59,7 @@ test("denies wrong agent, channel, account, and host-derived trigger", () => {
   const cases = [
     [{ ...validFacts, agentId: "main" }, "AGENT_DENIED"],
     [{ ...validFacts, channelId: "discord" }, "CHANNEL_DENIED"],
-    [{ ...validFacts, accountId: "default" }, "ACCOUNT_DENIED"],
+    [{ ...validFacts, accountId: "idea-mvp" }, "ACCOUNT_DENIED"],
     [{ ...validFacts, trigger: "heartbeat" }, "TRIGGER_DENIED"],
     [{ ...validFacts, trigger: "cron" }, "TRIGGER_DENIED"],
   ] as const;
@@ -72,9 +72,9 @@ test("extracts identity from trusted tool factory context, never tool arguments"
   const context = {
     agentId: "idea-mvp",
     messageChannel: "telegram",
-    agentAccountId: "idea-mvp",
+    agentAccountId: "default",
     requesterSenderId: "123456789",
-    deliveryContext: { channel: "telegram", accountId: "idea-mvp", to: "123456789" },
+    deliveryContext: { channel: "telegram", accountId: "default", to: "123456789" },
   } as OpenClawPluginToolContext;
   assert.equal(requesterFromToolContext(context, config).ok, true);
   assert.deepEqual(requesterFromToolContext({ ...context, oneShotCliRun: true }, config), {
@@ -88,7 +88,7 @@ test("native Telegram command adapter binds channel-qualified From/To to the tru
     agentId: "idea-mvp",
     channel: "telegram",
     senderId: "123456789",
-    accountId: "idea-mvp",
+    accountId: "default",
     from: "telegram:123456789",
     to: "telegram:123456789",
   } as PluginCommandContext;
@@ -106,7 +106,7 @@ test("before_agent_run adapter requires a direct user trigger", () => {
   const event = {
     prompt: "untrusted prompt",
     messages: [],
-    accountId: "idea-mvp",
+    accountId: "default",
     channelId: "telegram",
     senderId: "123456789",
   } satisfies PluginHookBeforeAgentRunEvent;

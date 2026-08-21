@@ -35,7 +35,7 @@
         "required": ["channelId", "accountId", "pilotSenderIdEnv", "adminSenderIdsEnv"],
         "properties": {
           "channelId": { "const": "telegram" },
-          "accountId": { "const": "idea-mvp" },
+          "accountId": { "const": "default" },
           "pilotSenderIdEnv": { "const": "TELEGRAM_PILOT_SENDER_ID" },
           "adminSenderIdsEnv": { "const": "BUSINESS_ADMIN_TELEGRAM_IDS" }
         }

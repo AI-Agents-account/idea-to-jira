@@ -58,16 +58,24 @@ docker compose --env-file .env config --quiet
 
 ## 3. Live-local readiness before Telegram
 
-Start the isolated Gateway only after approval:
+After Technical Owner approval, the preferred launch is one fail-closed command:
 
 ```bash
-docker compose up -d openclaw-gateway
+./scripts/pilot-up.sh
+```
+
+The operator host needs Docker and Docker Compose v2 only; Node.js/npm are not launch prerequisites. Compose injects the complete `.env` into the container. Before container creation, the launcher rejects `JIRA_TOKEN` and `OPENAI_API_KEY`; after image build, the Node-enabled container validates the complete injected environment. The image entrypoint repeats the forbidden-credential gate so direct Compose startup cannot bypass it. If no persisted OpenAI OAuth profile exists, the launcher starts an interactive device-code login in the raised Gateway container, persists the profile in the mounted state/secret directories, restarts the Gateway and continues readiness checks. On any startup/readiness failure it stops the Gateway. Development `scripts/preflight.sh` remains a separate source/CI gate for reviewed revisions.
+
+The equivalent manual readiness commands are:
+
+```bash
+docker compose up -d --wait --wait-timeout 180 openclaw-gateway
 docker compose ps
 docker compose exec openclaw-gateway node /app/scripts/healthcheck.mjs
 docker compose exec openclaw-gateway node /app/scripts/pilot-readiness.mjs
 ```
 
-Expected final readiness fields: `status=ready mode=live-local`, healthy current schema, `jira_post=disabled`, `audio=disabled`. The script reads local effective config/Catalog/storage only; it does not contact Telegram, OpenAI or Jira.
+Expected final readiness fields: `status=ready mode=live-local`, `runtime=ready`, healthy current schema, `jira_post=disabled`, `audio=disabled`. The script validates local effective config/Catalog and calls the authenticated loopback Gateway method `idea-to-jira.runtime-status`; only the active in-Gateway plugin generation can report runtime readiness. Opening SQLite in a separate process is not readiness evidence. The script does not contact Telegram, OpenAI or Jira.
 
 Also confirm create readiness remains closed:
 
@@ -81,7 +89,7 @@ Any non-zero pilot readiness is a stop. Fix configuration/auth/storage offline; 
 
 The operator performs these steps from the exact allowlisted Telegram user in a direct chat with the dedicated bot. Use synthetic, non-sensitive idea text.
 
-1. **Context/boundary:** send one harmless text greeting. Verify the response comes from account `idea-mvp`; inspect sanitized logs only for pass/fail codes, not content.
+1. **Context/boundary:** send one harmless text greeting. Verify the response comes from agent `idea-mvp` on the single Telegram account `default`; inspect sanitized logs only for pass/fail codes, not content.
 2. **RBAC:** request access through the implemented command/tool flow. Verify a pending request and an allowlisted admin decision; repeat the same decision to prove anti-replay/stale rejection.
 3. **Draft create:** send synthetic text sufficient to create a Draft. Record only redacted Draft reference and version `1`.
 4. **Read/patch:** read the same Draft, apply one meaningful text update with expected version, and verify version increments exactly once.
@@ -126,7 +134,13 @@ If network telemetry is available, attach only the count `Jira HTTP requests = 0
 Immediate stop conditions: unexpected sender accepted, group/topic processing, non-text mutation, repeated/stale CAS accepted, lost state after restart, Jira traffic, secret/private content in logs, or readiness failure.
 
 ```bash
-docker compose down
+npm run pilot:down
+```
+
+Equivalent direct command:
+
+```bash
+docker compose --env-file .env down
 ```
 
 `down` must not delete volumes. Preserve state for incident analysis under existing access controls; do not copy SQLite/logs into Git. Rotate a token only through the operator's normal secret procedure if exposure is suspected.

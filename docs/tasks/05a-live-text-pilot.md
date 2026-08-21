@@ -11,7 +11,7 @@ Stages 01–05 дают безопасный локальный контур, к
 ## Зависимости и предусловия
 
 - Stages 01–05 приняты и локальные проверки проходят.
-- Используется отдельный Telegram bot/account `idea-mvp`, один numeric `TELEGRAM_PILOT_SENDER_ID`, включённый в pilot Business Admin allowlist, и reviewed canonical `openai/*` route.
+- Используется отдельный Telegram bot через единственный canonical account `default`, agent `idea-mvp`, один numeric `TELEGRAM_PILOT_SENDER_ID`, включённый в pilot Business Admin allowlist, и reviewed canonical `openai/*` route.
 - Настоящие credentials и auth-profile state находятся только в runtime secret/state mounts, вне Git и отчётов.
 - Technical Owner явно разрешает окно smoke и имеет rollback/остановку Gateway.
 
@@ -34,7 +34,7 @@ Stages 01–05 дают безопасный локальный контур, к
 
 1. OpenClaw Telegram account использует `dmPolicy: "allowlist"`, `groupPolicy: "disabled"` и allowlist ровно из `TELEGRAM_PILOT_SENDER_ID`.
 2. Plugin effective config отдельно закрепляет тот же sender через protected env ref; несовпадение/отсутствие блокирует startup/run.
-3. `before_agent_run`, command и tool contexts принимают только `telegram`/`idea-mvp`, direct peer destination, user trigger и exact pilot sender.
+3. `before_agent_run`, command и tool contexts принимают только `telegram` account `default`, agent `idea-mvp`, direct peer destination, user trigger и exact pilot sender.
 4. Agent tool allowlist содержит только пять Stage-04/05 tools; media audio understanding явно disabled.
 5. Jira `writeMode` остаётся manifest `const: "disabled"`; runtime использует `DisabledJiraIssueClient`, не получает Jira credential и не содержит create tool/transport.
 6. `readiness:pilot` проверяет effective OpenClaw/plugin boundaries, model route, Catalog checksum, disabled Jira adapter и storage health, не вызывая Telegram, OpenAI или Jira.

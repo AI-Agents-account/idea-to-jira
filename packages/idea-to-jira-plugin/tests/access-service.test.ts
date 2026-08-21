@@ -17,7 +17,7 @@ function requester(senderId: string): TrustedRequesterContext {
   return Object.freeze({
     agentId: "idea-mvp",
     channelId: "telegram",
-    accountId: "idea-mvp",
+    accountId: "default",
     senderId,
     chatId: senderId,
   });

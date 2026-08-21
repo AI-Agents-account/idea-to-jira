@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -28,10 +29,9 @@ try {
     ? resolve(process.env.IDEA_TO_JIRA_PLUGIN_PATH)
     : resolve(process.cwd(), "packages/idea-to-jira-plugin");
   const moduleUrl = (path) => pathToFileURL(resolve(pluginRoot, path)).href;
-  const [{ assertCreateDisabled, loadEffectiveConfig }, { openPluginDatabase }, { DisabledJiraIssueClient }] =
+  const [{ assertCreateDisabled, loadEffectiveConfig }, { DisabledJiraIssueClient }] =
     await Promise.all([
       import(moduleUrl("dist/src/config.js")),
-      import(moduleUrl("dist/src/storage/database.js")),
       import(moduleUrl("dist/src/jira/client.js")),
     ]);
 
@@ -40,9 +40,11 @@ try {
   if (!pilotSenderId || !/^[1-9][0-9]{4,19}$/.test(pilotSenderId)) stop("PILOT_ACTOR_INVALID");
 
   const telegram = host.channels?.telegram;
-  const account = telegram?.accounts?.["idea-mvp"];
+  const accountIds = Object.keys(telegram?.accounts ?? {});
+  const account = telegram?.accounts?.default;
   if (
-    telegram?.defaultAccount !== "idea-mvp" ||
+    telegram?.defaultAccount !== "default" ||
+    !exactList(accountIds, ["default"]) ||
     telegram.dmPolicy !== "allowlist" ||
     !exactList(telegram.allowFrom, [pilotSenderId]) ||
     account?.enabled !== true ||
@@ -68,7 +70,7 @@ try {
   if (
     binding.length !== 1 ||
     binding[0]?.match?.channel !== "telegram" ||
-    binding[0]?.match?.accountId !== "idea-mvp"
+    binding[0]?.match?.accountId !== "default"
   ) stop("AGENT_BINDING_INVALID");
 
   const rawPlugin = host.plugins?.entries?.["idea-to-jira"]?.config;
@@ -99,15 +101,52 @@ try {
   }
   if (Object.hasOwn(process.env, "JIRA_TOKEN")) stop("JIRA_CREDENTIAL_PRESENT");
 
-  const database = openPluginDatabase({ stateDir: loaded.config.stateDir });
-  const health = database.health;
-  database.close();
-  if (!health.healthy || health.quickCheck !== "ok" || health.foreignKeyViolations !== 0) {
-    stop("STORAGE_NOT_READY");
+  const gatewayPort = host.gateway?.port;
+  if (
+    host.gateway?.mode !== "local" ||
+    !Number.isSafeInteger(gatewayPort) ||
+    gatewayPort < 1 ||
+    gatewayPort > 65535
+  ) stop("GATEWAY_BOUNDARY_INVALID");
+
+  const gatewayEnv = {
+    ...process.env,
+    OPENCLAW_GATEWAY_PORT: String(gatewayPort),
+  };
+  delete gatewayEnv.OPENCLAW_GATEWAY_URL;
+  const gatewayCall = spawnSync(
+    "openclaw",
+    ["gateway", "call", "idea-to-jira.runtime-status", "--json", "--timeout", "5000"],
+    { encoding: "utf8", maxBuffer: 64 * 1024, env: gatewayEnv },
+  );
+  if (gatewayCall.status !== 0 || gatewayCall.signal || typeof gatewayCall.stdout !== "string") {
+    stop("PLUGIN_RUNTIME_UNREACHABLE");
   }
+  let runtimeStatus;
+  try {
+    runtimeStatus = JSON.parse(gatewayCall.stdout);
+  } catch {
+    stop("PLUGIN_RUNTIME_RESPONSE_INVALID");
+  }
+  if (
+    runtimeStatus?.schemaVersion !== 1 ||
+    !Number.isSafeInteger(runtimeStatus.generation) ||
+    runtimeStatus.generation < 1 ||
+    !Number.isSafeInteger(runtimeStatus.latestGeneration) ||
+    runtimeStatus.latestGeneration < runtimeStatus.generation ||
+    typeof runtimeStatus.instanceId !== "string" ||
+    !/^[0-9a-f-]{36}$/.test(runtimeStatus.instanceId) ||
+    runtimeStatus.phase !== "READY" ||
+    runtimeStatus.code !== null ||
+    runtimeStatus.storageHealthy !== true ||
+    !Number.isSafeInteger(runtimeStatus.storageSchemaVersion) ||
+    runtimeStatus.storageSchemaVersion < 1 ||
+    typeof runtimeStatus.buildFingerprint !== "string" ||
+    !/^[a-f0-9]{64}$/.test(runtimeStatus.buildFingerprint)
+  ) stop("PLUGIN_RUNTIME_NOT_READY");
 
   process.stdout.write(
-    `pilot-readiness status=ready mode=live-local schema=${health.schemaVersion} jira_post=disabled audio=disabled\n`,
+    `pilot-readiness status=ready mode=live-local schema=${runtimeStatus.storageSchemaVersion} runtime=ready build=${runtimeStatus.buildFingerprint} jira_post=disabled audio=disabled\n`,
   );
 } catch {
   stop("PILOT_READINESS_FAILED");
