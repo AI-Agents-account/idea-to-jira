@@ -20,13 +20,19 @@ test("builds one immutable effective configuration from config and protected env
   const result = load();
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.equal(result.config.jira.projectId, "18100");
-  assert.equal(result.config.jira.issueTypeId, "11500");
+  assert.equal(result.config.jira.projectKey, "PROJECT");
+  assert.equal(result.config.jira.issueTypeName, "Feature");
+  assert.equal(result.config.jira.url, "https://jira.example.test");
   assert.deepEqual(result.config.allowedTools, [
     "idea_to_jira_create_draft",
     "idea_to_jira_read_draft",
     "idea_to_jira_patch_draft",
     "idea_to_jira_cancel_draft",
+    "idea_to_jira_search_duplicates",
+    "idea_to_jira_answer_field",
+    "idea_to_jira_preview_issue",
+    "idea_to_jira_confirm_issue",
+    "idea_to_jira_create_issue",
     "idea_to_jira_request_access",
   ]);
   assert.equal(result.config.limits.activeDrafts, 3);
@@ -42,11 +48,11 @@ test("fails closed when a protected runtime value is missing", () => {
   assert.deepEqual(result, { ok: false, code: "SECRET_REF_MISSING" });
 });
 
-test("does not require or retain a Jira credential while write mode is structurally disabled", () => {
-  const result = load(validRawConfig(), { ...validEnvironment, JIRA_TOKEN: "present-but-unused" });
+test("does not require or retain a Jira credential and records presence only", () => {
+  const result = load(validRawConfig(), { ...validEnvironment, JIRA_TOKEN: "present-but-never-retained" });
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.equal(result.config.jira.tokenEnv, "JIRA_TOKEN");
+  assert.equal(result.config.jira.credentialAvailable, true);
   assert.equal("token" in result.config.jira, false);
 });
 
@@ -58,13 +64,6 @@ test("rejects unknown config keys and protected environment reference drift", ()
   (unknownNested.limits as Record<string, unknown>).unexpected = 1;
   assert.deepEqual(load(unknownNested), { ok: false, code: "CONFIG_INVALID" });
 
-  const driftedReference = validRawConfig();
-  (driftedReference.jira as Record<string, unknown>).tokenEnv = "UNRELATED_SECRET";
-  assert.deepEqual(
-    load(driftedReference, { ...validEnvironment, UNRELATED_SECRET: "present" }),
-    { ok: false, code: "CONFIG_INVALID" },
-  );
-
   const driftedPilotReference = validRawConfig();
   (driftedPilotReference.telegram as Record<string, unknown>).pilotSenderIdEnv = "UNRELATED_ACTOR";
   assert.deepEqual(load(driftedPilotReference), { ok: false, code: "CONFIG_INVALID" });
@@ -72,18 +71,19 @@ test("rejects unknown config keys and protected environment reference drift", ()
 
 test("rejects non-HTTPS or path-bearing Jira origins", () => {
   for (const origin of ["http://jira.example.test", "https://jira.example.test/rest/api", "not-a-url"]) {
-    const result = load(validRawConfig(), { ...validEnvironment, JIRA_BASE_URL: origin });
-    assert.deepEqual(result, { ok: false, code: "SECRET_REF_MISSING" });
+    const raw = validRawConfig();
+    (raw.jira as Record<string, unknown>).url = origin;
+    assert.deepEqual(load(raw), { ok: false, code: "JIRA_SCOPE_INVALID" });
   }
 });
 
-test("rejects Jira scope, write mode, and tool allowlist drift", () => {
+test("accepts deployment Jira scope and rejects an unsafe confirmation gate/tool allowlist", () => {
   const scope = validRawConfig();
   (scope.jira as Record<string, unknown>).projectKey = "OTHER";
-  assert.deepEqual(load(scope), { ok: false, code: "JIRA_SCOPE_INVALID" });
+  assert.equal(load(scope).ok, true);
 
   const write = validRawConfig();
-  (write.jira as Record<string, unknown>).writeMode = "enabled";
+  ((write.jira as Record<string, unknown>).create as Record<string, unknown>).requireConfirmation = false;
   assert.deepEqual(load(write), { ok: false, code: "CREATE_GATE_INVALID" });
 
   const tools = validRawConfig();

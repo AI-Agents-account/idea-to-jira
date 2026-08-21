@@ -11,17 +11,23 @@ async function text(path: string): Promise<string> {
   return readFile(resolve(root, path), "utf8");
 }
 
-test("manifest and host config expose only the Stage-05 typed Draft/access tools", async () => {
+test("manifest and host config expose only typed Draft/access/Jira workflow tools", async () => {
   const expected = [
     "idea_to_jira_create_draft",
     "idea_to_jira_read_draft",
     "idea_to_jira_patch_draft",
     "idea_to_jira_cancel_draft",
+    "idea_to_jira_search_duplicates",
+    "idea_to_jira_answer_field",
+    "idea_to_jira_preview_issue",
+    "idea_to_jira_confirm_issue",
+    "idea_to_jira_create_issue",
     "idea_to_jira_request_access",
   ];
   const manifest = JSON.parse(await text("packages/idea-to-jira-plugin/openclaw.plugin.json"));
   assert.deepEqual(manifest.contracts.tools, expected);
-  assert.equal(manifest.configSchema.properties.jira.properties.writeMode.const, "disabled");
+  assert.equal(manifest.configSchema.properties.jira.properties.create.properties.requireConfirmation.const, true);
+  assert.equal(manifest.configSchema.properties.jira.properties.url.pattern, "^https://");
   assert.equal(manifest.configSchema.properties.limits.properties.activeDrafts.maximum, 100);
 
   const openclawConfig = await text("config/openclaw.json5");
@@ -52,6 +58,8 @@ test("Compose maps only guarded runtime values and keeps Gateway loopback-only",
   assert.match(compose, /OPENCLAW_GATEWAY_PORT: "18789"/);
   assert.match(compose, /JIRA_BASE_URL: \$\{JIRA_BASE_URL:\?/);
   assert.doesNotMatch(compose, /JIRA_TOKEN:/);
+  assert.match(compose, /JIRA_TOKEN_FILE: \/run\/secrets\/jira-token/);
+  assert.match(compose, /\.\/data\/secrets:\/run\/secrets:ro/);
   assert.match(compose, /TELEGRAM_PILOT_SENDER_ID: \$\{TELEGRAM_PILOT_SENDER_ID:\?/);
   assert.match(compose, /OPENAI_MODEL: \$\{OPENAI_MODEL:\?/);
   assert.match(compose, /BUSINESS_ADMIN_TELEGRAM_IDS: \$\{BUSINESS_ADMIN_TELEGRAM_IDS:\?/);
@@ -83,7 +91,7 @@ test("Compose maps only guarded runtime values and keeps Gateway loopback-only",
   assert.doesNotMatch(pilotUp, /if \[ ! -f data\/config\/openclaw\.json5 \]/);
   assert.doesNotMatch(pilotUp, /required command not found: (?:node|npm)/);
   assert.match(pilotUp, /pilot-readiness\.mjs/);
-  assert.match(pilotUp, /create-readiness\.mjs --expect-disabled/);
+  assert.match(pilotUp, /create-readiness\.mjs --verify-contract/);
   assert.match(dockerfile, /node scripts\/plugin-build-fingerprint\.mjs > \/src\/PLUGIN_BUILD_FINGERPRINT/);
   assert.match(dockerfile, /COPY --from=plugin-build \/src\/PLUGIN_BUILD_FINGERPRINT \.\/BUILD_FINGERPRINT/);
   assert.match(dockerfile, /ENTRYPOINT \["\/app\/scripts\/pilot-container-entrypoint\.sh"\]/);
@@ -175,7 +183,7 @@ test("target-container storage verification is wired into the image and CI", asy
   assert.match(workflow, /storage-container-check\.mjs/);
   assert.doesNotMatch(workflow, /compose[^\n]*run[^\n]*--no-deps/);
   assert.match(storageCheck, /openPluginDatabase/);
-  assert.match(storageCheck, /schema=4 journal=wal modes=private restart=ok/);
+  assert.match(storageCheck, /schema=5 journal=wal modes=private restart=ok/);
 });
 
 test("health and create-readiness are separate signals", async () => {
@@ -187,7 +195,7 @@ test("health and create-readiness are separate signals", async () => {
   const packageJson = JSON.parse(await text("package.json"));
   assert.match(compose, /healthcheck\.mjs/);
   assert.equal(packageJson.scripts["readiness:create"], "node scripts/create-readiness.mjs");
-  assert.equal(packageJson.scripts["verify:create-disabled"], "node scripts/create-readiness.mjs --expect-disabled");
+  assert.equal(packageJson.scripts["verify:create-contract"], "node scripts/create-readiness.mjs --verify-contract");
   assert.equal(packageJson.scripts["readiness:pilot"], "node scripts/pilot-readiness.mjs");
   assert.equal(packageJson.scripts["verify:pilot-structure"], "node scripts/pilot-readiness.mjs --structural");
   assert.match(dockerfile, /scripts\/pilot-readiness\.mjs/);

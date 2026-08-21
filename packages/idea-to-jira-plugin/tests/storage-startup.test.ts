@@ -31,6 +31,8 @@ interface RuntimeStatusPayload {
   readonly storageHealthy: boolean;
   readonly storageSchemaVersion: number | null;
   readonly buildFingerprint: string | null;
+  readonly jiraReadiness: string;
+  readonly jiraMetadataHash: string | null;
 }
 
 type RuntimeStatusHandler = (options: {
@@ -63,6 +65,10 @@ function configuredFixture(): { rawConfig: Record<string, unknown>; stateDir: st
 
 function setRuntimeEnvironment(t: test.TestContext): void {
   const previous = new Map<string, string | undefined>();
+  for (const key of ["JIRA_TOKEN", "JIRA_TOKEN_FILE"]) {
+    previous.set(key, process.env[key]);
+    delete process.env[key];
+  }
   for (const [key, value] of Object.entries(validEnvironment)) {
     previous.set(key, process.env[key]);
     process.env[key] = value;
@@ -124,6 +130,8 @@ test("storage service gates requests until schema health succeeds and closes cle
     storageHealthy: false,
     storageSchemaVersion: null,
     buildFingerprint: null,
+    jiraReadiness: "JIRA_UNAVAILABLE",
+    jiraMetadataHash: null,
   });
 
   const event = {
@@ -158,7 +166,7 @@ test("storage service gates requests until schema health succeeds and closes cle
   assert.equal(readyStatus.phase, "READY");
   assert.equal(readyStatus.code, null);
   assert.equal(readyStatus.storageHealthy, true);
-  assert.equal(readyStatus.storageSchemaVersion, 4);
+  assert.equal(readyStatus.storageSchemaVersion, 5);
   const afterStart = beforeAgentRun(event, context);
   assert.ok(afterStart);
   assert.equal(afterStart.outcome, "pass");

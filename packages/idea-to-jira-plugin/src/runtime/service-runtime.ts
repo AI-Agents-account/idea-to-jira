@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { AccessService } from "../access/access-service.js";
 import { SqliteAuditWriter } from "../audit/index.js";
 import type { EffectiveConfig } from "../config.js";
 import type { SafeErrorCode } from "../errors/index.js";
+import { JiraHttpClient } from "../jira/http-client.js";
+import { JiraMetadataClient } from "../jira/metadata-client.js";
+import { JiraWorkflowPersistence } from "../jira/persistence.js";
+import { JiraPostingService } from "../jira/posting-service.js";
+import { JiraSearchClient } from "../jira/search-client.js";
+import { JiraWorkflowService } from "../jira/workflow-service.js";
 import { TokenBucketRateLimiter } from "./policy.js";
 import {
   openPluginDatabase,
@@ -24,6 +31,7 @@ export interface RuntimeServices {
   readonly accessService: AccessService;
   readonly draftService: IdeaToJiraDraftService;
   readonly limiter: TokenBucketRateLimiter;
+  readonly jiraWorkflow?: JiraWorkflowService;
 }
 
 export interface RuntimeServiceFactories {
@@ -31,6 +39,7 @@ export interface RuntimeServiceFactories {
   readonly createAuditWriter: () => SqliteAuditWriter;
   readonly createAccessService: (storage: PluginDatabase, config: EffectiveConfig) => AccessService;
   readonly createDraftService: (storage: PluginDatabase, config: EffectiveConfig) => IdeaToJiraDraftService;
+  readonly createJiraWorkflow?: (storage: PluginDatabase, config: EffectiveConfig) => JiraWorkflowService | undefined;
 }
 
 interface RuntimeRecord {
@@ -72,6 +81,24 @@ const defaultFactories: RuntimeServiceFactories = Object.freeze({
     unitOfWork: storage.repositories,
     maxActiveDrafts: config.limits.activeDrafts,
   }),
+  createJiraWorkflow: (storage: PluginDatabase, config: EffectiveConfig) => {
+    let token = process.env.JIRA_TOKEN?.trim();
+    if (!token && process.env.JIRA_TOKEN_FILE?.trim()) {
+      try { token = readFileSync(process.env.JIRA_TOKEN_FILE.trim(), "utf8").trim(); } catch { token = undefined; }
+    }
+    if (!config.jira.enabled || !config.jira.credentialAvailable || !token) return undefined;
+    const http = new JiraHttpClient({
+      origin: config.jira.url,
+      token,
+      timeoutMs: config.jira.search.timeoutMs,
+      maxResponseBytes: Math.max(2_097_152, config.jira.search.maxContextBytes * 4),
+    });
+    const metadata = new JiraMetadataClient({ config: config.jira, http });
+    const search = new JiraSearchClient(config.jira, http);
+    const posting = new JiraPostingService(storage.repositories, config.jira, http);
+    const persistence = new JiraWorkflowPersistence(storage.repositories);
+    return new JiraWorkflowService(config.jira, metadata, search, posting, persistence);
+  },
 });
 
 function slot(): RuntimeSlot {
@@ -95,7 +122,9 @@ export function createServiceRuntimeCandidate(
     const accessService = factories.createAccessService(storage, config);
     const draftService = factories.createDraftService(storage, config);
     const limiter = new TokenBucketRateLimiter(config.limits);
-    return Object.freeze({ config, storage, auditWriter, accessService, draftService, limiter });
+    const jiraWorkflow = factories.createJiraWorkflow?.(storage, config);
+    jiraWorkflow?.recoverAfterRestart();
+    return Object.freeze({ config, storage, auditWriter, accessService, draftService, limiter, ...(jiraWorkflow ? { jiraWorkflow } : {}) });
   } catch (error) {
     try {
       storage?.close();

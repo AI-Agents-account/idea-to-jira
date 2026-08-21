@@ -19,7 +19,7 @@ fi
 npm run validate:json
 npm run check
 npm run build
-npm run verify:create-disabled
+npm run verify:create-contract
 
 validation_home="${TMPDIR:-/tmp}/idea-to-jira-openclaw-validation-2026.7.1-2"
 mkdir -p "$validation_home"

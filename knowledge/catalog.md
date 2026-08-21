@@ -1,6 +1,6 @@
 # Idea-to-Jira Knowledge Catalog
 
-> Status: `INCOMPLETE — ROUTING AND JIRA CREATE MUST FAIL CLOSED`
+> Status: `INCOMPLETE — PRODUCT ROUTING MUST FAIL CLOSED`
 >
 > Owner: the dedicated OpenClaw deployment. Production collection, validation and refresh are a separate delivery task.
 >
@@ -15,17 +15,15 @@
 
 ## Jira target
 
-- Project key: `FPF`
-- Project id: `18100`
-- Issue type: `Feature`
-- Issue type id: `11500`
+- Project key and issue-type name are deployment configuration.
+- Jira resolves project, issue-type, field, and option IDs during metadata discovery; this catalog stores no numeric Jira IDs.
 
 ## Required product records
 
 Replace this section with verified records. Every record must include:
 
 - stable product id and display name;
-- Jira route option ids and labels;
+- Jira route labels; runtime metadata resolves their IDs;
 - responsible team(s);
 - responsible PO Telegram destination;
 - evidence source and verification timestamp;

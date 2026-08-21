@@ -28,6 +28,10 @@ function configuredFixture(): Record<string, unknown> {
 
 test("registered typed tools perform own-Draft create/read/CAS patch/cancel end to end", async (t) => {
   const previous = new Map<string, string | undefined>();
+  for (const key of ["JIRA_TOKEN", "JIRA_TOKEN_FILE"]) {
+    previous.set(key, process.env[key]);
+    delete process.env[key];
+  }
   for (const [key, value] of Object.entries(validEnvironment)) {
     previous.set(key, process.env[key]);
     process.env[key] = value;
@@ -58,7 +62,7 @@ test("registered typed tools perform own-Draft create/read/CAS patch/cancel end 
   plugin.register(api);
   assert.ok(service);
   assert.ok(beforeAgentRun);
-  assert.equal(factories.length, 5);
+  assert.equal(factories.length, 10);
   await service.start({} as never);
 
   const event = {

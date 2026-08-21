@@ -3,7 +3,6 @@ import { createAuditEvent, hashAuditActorReference, type SqliteAuditWriter } fro
 import { assertCreateDisabled, loadEffectiveConfig } from "./config.js";
 import type { CancelDraftInput, CreateDraftInput, PatchDraftInput } from "./domain/draft.js";
 import { isSafeErrorCode, SafeError } from "./errors/index.js";
-import { DisabledJiraIssueClient } from "./jira/client.js";
 import { createCorrelationContext, StructuredLogger } from "./observability/index.js";
 import {
   assertPayloadWithinLimit,
@@ -117,6 +116,25 @@ const cancelDraftParameters = Type.Object({
   expectedVersion: Type.Integer({ minimum: 1 }),
 }, { additionalProperties: false });
 const requestAccessParameters = Type.Object({}, { additionalProperties: false });
+const jiraDraftParameters = Type.Object({ draftId: text(128) }, { additionalProperties: false });
+const jiraAnswerParameters = Type.Object({
+  draftId: text(128),
+  fieldId: text(128),
+  value: Type.Union([text(10_000), Type.Number(), Type.Array(text(512), { minItems: 1, maxItems: 50, uniqueItems: true })]),
+}, { additionalProperties: false });
+const jiraPreviewParameters = Type.Object({
+  draftId: text(128),
+  explicitProceed: Type.Optional(Type.Boolean()),
+}, { additionalProperties: false });
+const jiraConfirmParameters = Type.Object({
+  draftId: text(128),
+  explicitProceed: Type.Optional(Type.Boolean()),
+}, { additionalProperties: false });
+const jiraCreateParameters = Type.Object({
+  draftId: text(128),
+  confirmationId: text(128),
+  explicitProceed: Type.Optional(Type.Boolean()),
+}, { additionalProperties: false });
 
 function runtimeBuildFingerprint(): string | null {
   const value = process.env.IDEA_TO_JIRA_BUILD_FINGERPRINT?.trim();
@@ -183,7 +201,7 @@ function logRuntimeDiagnostic(
 const plugin = {
   id: "idea-to-jira",
   name: "Idea-to-Jira MVP",
-  description: "Fail-closed versioned Draft foundation; Jira create remains disabled.",
+  description: "Configuration-driven Draft-to-Jira MVP with bounded search and atomic confirmed create.",
   register(api: OpenClawPluginApi) {
     const loaded = loadEffectiveConfig(api.pluginConfig);
     if (!loaded.ok) {
@@ -193,11 +211,11 @@ const plugin = {
 
     const config = loaded.config;
     assertCreateDisabled(config);
-    const jira = new DisabledJiraIssueClient();
     const logger = new StructuredLogger(api.logger);
     const runtimeGeneration = createServiceRuntimeGeneration();
     let ownedInstanceId: string | undefined;
     let ownedStorage: PluginDatabase | undefined;
+    let ownedJiraWorkflow: RuntimeServices["jiraWorkflow"];
 
     const logLifecycle = (
       eventType: "STORAGE_STARTING" | "STORAGE_READY" | "STORAGE_STARTUP" | "STORAGE_STOPPED",
@@ -249,6 +267,8 @@ const plugin = {
             throw new SafeError("STORAGE_STARTUP_FAILED", false);
           }
           ownedStorage = candidate.storage;
+          ownedJiraWorkflow = candidate.jiraWorkflow;
+          void candidate.jiraWorkflow?.start();
           logLifecycle("STORAGE_READY", "SUCCEEDED");
         } catch (error) {
           failServiceRuntime(runtimeGeneration, "STORAGE_STARTUP_FAILED");
@@ -261,8 +281,11 @@ const plugin = {
       stop() {
         stopServiceRuntime(runtimeGeneration);
         const activeStorage = ownedStorage;
+        const activeJiraWorkflow = ownedJiraWorkflow;
         ownedStorage = undefined;
+        ownedJiraWorkflow = undefined;
         try {
+          activeJiraWorkflow?.stop();
           activeStorage?.close();
           logLifecycle("STORAGE_STOPPED", "SUCCEEDED");
         } catch {
@@ -272,7 +295,6 @@ const plugin = {
       },
     });
 
-    void jira;
     registerAccessCommands(api, config, () => {
       const runtime = getServiceRuntime();
       return runtime ? { config: runtime.config, service: runtime.accessService } : undefined;
@@ -291,6 +313,8 @@ const plugin = {
         storageHealthy: active?.storage.health.healthy === true,
         storageSchemaVersion: active?.storage.health.schemaVersion ?? null,
         buildFingerprint: runtimeBuildFingerprint(),
+        jiraReadiness: active?.jiraWorkflow?.status().readiness ?? "JIRA_UNAVAILABLE",
+        jiraMetadataHash: active?.jiraWorkflow?.status().metadataHash ?? null,
       });
     }, { scope: "operator.read" });
 
@@ -390,7 +414,7 @@ const plugin = {
       action: (
         runtime: RuntimeServices,
         requester: ReturnType<typeof requesterFromToolContext> & { readonly ok: true },
-      ) => T,
+      ) => T | Promise<T>,
     ): Promise<{ content: Array<{ type: "text"; text: string }>; details: T }> {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime) {
@@ -417,7 +441,7 @@ const plugin = {
           links: trace,
           retentionClass: "AUDIT_1Y",
         }))) throw new SafeError("AUDIT_REQUIRED", false);
-        const result = action(activeRuntime, requester);
+        const result = await action(activeRuntime, requester);
         return {
           content: [{ type: "text", text: JSON.stringify(result) }],
           details: result,
@@ -488,6 +512,101 @@ const plugin = {
           runtime.draftService.cancelDraft(currentRequester.context, input as CancelDraftInput)),
       };
     }, { name: "idea_to_jira_cancel_draft" });
+
+    api.registerTool((toolContext) => {
+      const activeRuntime = getServiceRuntime();
+      if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
+      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
+      if (!requester.ok || !activeRuntime.accessService.authorizeConversation(requester.context).allowed) return null;
+      return {
+        name: "idea_to_jira_search_duplicates",
+        label: "Search configured Jira scope",
+        description: "Search only the deployment-configured JQL/fields and produce a version-bound duplicate decision.",
+        parameters: jiraDraftParameters,
+        execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
+          const draft = runtime.draftService.readDraft(currentRequester.context, (input as { draftId: string }).draftId).draft;
+          if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          return runtime.jiraWorkflow.searchDuplicates(draft);
+        }),
+      };
+    }, { name: "idea_to_jira_search_duplicates" });
+
+    api.registerTool((toolContext) => {
+      const activeRuntime = getServiceRuntime();
+      if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
+      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
+      if (!requester.ok || !activeRuntime.accessService.authorizeConversation(requester.context).allowed) return null;
+      return {
+        name: "idea_to_jira_answer_field",
+        label: "Answer a discovered Jira field",
+        description: "Store a semantic answer for one current metadata-derived typed question; arbitrary Jira JSON is impossible.",
+        parameters: jiraAnswerParameters,
+        execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
+          const answer = input as { draftId: string; fieldId: string; value: string | number | readonly string[] };
+          const draft = runtime.draftService.readDraft(currentRequester.context, answer.draftId).draft;
+          if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          return runtime.jiraWorkflow.answerField(draft, answer.fieldId, answer.value);
+        }),
+      };
+    }, { name: "idea_to_jira_answer_field" });
+
+    api.registerTool((toolContext) => {
+      const activeRuntime = getServiceRuntime();
+      if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
+      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
+      if (!requester.ok || !activeRuntime.accessService.authorizeConversation(requester.context).allowed) return null;
+      return {
+        name: "idea_to_jira_preview_issue",
+        label: "Preview exact Jira issue",
+        description: "Build a bounded preview bound to the current Draft, metadata, duplicate decision, and canonical payload.",
+        parameters: jiraPreviewParameters,
+        execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
+          const value = input as { draftId: string; explicitProceed?: boolean };
+          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
+          if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          return runtime.jiraWorkflow.preview(draft, value.explicitProceed === true);
+        }),
+      };
+    }, { name: "idea_to_jira_preview_issue" });
+
+    api.registerTool((toolContext) => {
+      const activeRuntime = getServiceRuntime();
+      if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
+      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
+      if (!requester.ok || !activeRuntime.accessService.authorizeConversation(requester.context).allowed) return null;
+      return {
+        name: "idea_to_jira_confirm_issue",
+        label: "Confirm exact Jira preview",
+        description: "Confirm the current preview for the host-derived actor/chat and exact Draft/metadata/payload versions.",
+        parameters: jiraConfirmParameters,
+        execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
+          const value = input as { draftId: string; explicitProceed?: boolean };
+          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
+          if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          const prepared = await runtime.jiraWorkflow.preview(draft, value.explicitProceed === true);
+          return runtime.jiraWorkflow.confirm(prepared, currentRequester.context.senderId, currentRequester.context.chatId);
+        }),
+      };
+    }, { name: "idea_to_jira_confirm_issue" });
+
+    api.registerTool((toolContext) => {
+      const activeRuntime = getServiceRuntime();
+      if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
+      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
+      if (!requester.ok || !activeRuntime.accessService.authorizeConversation(requester.context).allowed) return null;
+      return {
+        name: "idea_to_jira_create_issue",
+        label: "Create confirmed Jira issue",
+        description: "Execute the one fixed Jira create endpoint through the atomic idempotent operation boundary.",
+        parameters: jiraCreateParameters,
+        execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
+          const value = input as { draftId: string; confirmationId: string; explicitProceed?: boolean };
+          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
+          if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          return runtime.jiraWorkflow.create(draft, currentRequester.context.senderId, currentRequester.context.chatId, value.confirmationId, value.explicitProceed === true);
+        }),
+      };
+    }, { name: "idea_to_jira_create_issue" });
 
     api.registerTool((toolContext) => {
       const activeRuntime = getServiceRuntime();

@@ -18,13 +18,20 @@ export function validRawConfig(): Record<string, unknown> {
       productOwnerSenderIdsEnv: "PRODUCT_OWNER_TELEGRAM_IDS",
     },
     jira: {
-      originEnv: "JIRA_BASE_URL",
-      tokenEnv: "JIRA_TOKEN",
-      projectKey: "FPF",
-      projectId: "18100",
+      enabled: true,
+      url: "https://jira.example.test",
+      projectKey: "PROJECT",
       issueTypeName: "Feature",
-      issueTypeId: "11500",
-      writeMode: "disabled",
+      search: {
+        jql: 'project = "PROJECT" AND issuetype = "Feature" ORDER BY updated DESC',
+        fields: ["key", "summary", "description", "status", "labels", "components", "updated"],
+        maxResults: 50,
+        maxPages: 2,
+        timeoutMs: 10_000,
+        maxContextBytes: 65_536,
+      },
+      metadata: { refreshIntervalMinutes: 60 },
+      create: { requireConfirmation: true },
     },
     catalog: {
       path: "/catalog.md",
@@ -37,6 +44,11 @@ export function validRawConfig(): Record<string, unknown> {
       "idea_to_jira_read_draft",
       "idea_to_jira_patch_draft",
       "idea_to_jira_cancel_draft",
+      "idea_to_jira_search_duplicates",
+      "idea_to_jira_answer_field",
+      "idea_to_jira_preview_issue",
+      "idea_to_jira_confirm_issue",
+      "idea_to_jira_create_issue",
       "idea_to_jira_request_access",
     ],
     limits: { inputTextChars: 20_000, requestsPerMinute: 20, burst: 5, activeDrafts: 3 },
@@ -46,7 +58,6 @@ export function validRawConfig(): Record<string, unknown> {
 }
 
 export const validEnvironment = {
-  JIRA_BASE_URL: "https://jira.example.test",
   TELEGRAM_PILOT_SENDER_ID: "123456789",
   BUSINESS_ADMIN_TELEGRAM_IDS: "123456789,987654321",
   PRODUCT_OWNER_TELEGRAM_IDS: "111222333",
