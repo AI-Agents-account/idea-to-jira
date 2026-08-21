@@ -32,10 +32,11 @@
       "telegram": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["channelId", "accountId", "adminSenderIdsEnv"],
+        "required": ["channelId", "accountId", "pilotSenderIdEnv", "adminSenderIdsEnv"],
         "properties": {
           "channelId": { "const": "telegram" },
-          "accountId": { "const": "idea-mvp" },
+          "accountId": { "const": "default" },
+          "pilotSenderIdEnv": { "const": "TELEGRAM_PILOT_SENDER_ID" },
           "adminSenderIdsEnv": { "const": "BUSINESS_ADMIN_TELEGRAM_IDS" }
         }
       },
@@ -133,6 +134,11 @@
     },
     "telegram.adminSenderIdsEnv": {
       "label": "Admin sender allowlist environment variable",
+      "sensitive": true,
+      "advanced": true
+    },
+    "telegram.pilotSenderIdEnv": {
+      "label": "Controlled pilot sender environment variable",
       "sensitive": true,
       "advanced": true
     },

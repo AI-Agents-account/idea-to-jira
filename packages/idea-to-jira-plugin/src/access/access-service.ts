@@ -86,6 +86,38 @@ export interface UserAccessStatus {
   };
 }
 
+export type ConversationAccessDecision =
+  | { readonly allowed: true; readonly via: "ACTIVE_CREATOR" | "BUSINESS_ADMIN" }
+  | {
+      readonly allowed: false;
+      readonly state: "GUEST" | "PENDING" | "SUSPENDED" | "BLOCKED" | "ROLE_STALE";
+    };
+
+/** Pure policy over one transactional user/grant snapshot. */
+export function authorizeConversationStatus(
+  requester: TrustedRequesterContext,
+  status: UserAccessStatus,
+  config: EffectiveConfig,
+): ConversationAccessDecision {
+  if (status.userState === "BLOCKED") return { allowed: false, state: "BLOCKED" };
+  if (authorizeBusinessAdmin(requester, config).allowed) {
+    return { allowed: true, via: "BUSINESS_ADMIN" };
+  }
+  if (status.userState === "CREATOR") {
+    return status.role?.state === "ACTIVE"
+      ? { allowed: true, via: "ACTIVE_CREATOR" }
+      : { allowed: false, state: "ROLE_STALE" };
+  }
+  if (
+    status.userState === "GUEST" ||
+    status.userState === "PENDING" ||
+    status.userState === "SUSPENDED"
+  ) {
+    return { allowed: false, state: status.userState };
+  }
+  return { allowed: false, state: "ROLE_STALE" };
+}
+
 export interface AccessRequestSubmission {
   readonly created: boolean;
   readonly status: UserAccessStatus;
@@ -207,6 +239,10 @@ export class AccessService {
       if (!user) throw new SafeError("ACCESS_DENIED", false);
       return this.statusForUser(sql, user);
     });
+  }
+
+  authorizeConversation(requester: TrustedRequesterContext): ConversationAccessDecision {
+    return authorizeConversationStatus(requester, this.ensureUser(requester), this.options.config);
   }
 
   requestAccess(

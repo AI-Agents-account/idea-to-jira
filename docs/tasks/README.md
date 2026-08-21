@@ -8,7 +8,7 @@
 
 Этот каталог превращает нормативные требования в последовательность вертикальных этапов. Каждый файл — самостоятельный brief для отдельной инженерной сессии: с границами, конкретными компонентами, атомарными задачами, тестами и проверяемым выходом. Это план реализации, а не свидетельство готовности функций. Указанные новые файлы и каталоги — целевые пути внутри `packages/idea-to-jira-plugin/` и `docs/`; их наличие в brief не означает, что они уже реализованы.
 
-> Обновление 2026-08-21: Stage-01—05 реализованы последовательно; текущие доказательства описаны в `README.md`, `ARCHITECTURE.md`, `docs/STORAGE.md`, `docs/AUDIT_OBSERVABILITY.md`, `docs/RBAC_ACCESS.md` и `docs/DRAFT_VERSIONING.md`. Ниже сохранён исходный gap-analysis, поэтому формулировки «сейчас доказано» относятся к указанному baseline commit, а не к текущему HEAD.
+> Обновление 2026-08-21: Stage-01—05 реализованы последовательно. Текущий следующий этап — [Stage-05A controlled live text-only pilot](05a-live-text-pilot.md). Он проверяет только существующие Stages 01–05, не выполняет Telegram/Jira calls при локальной реализации и не открывает Jira POST. После pilot сначала реализуется read-only/fake-transport core этапов 08–12; полный **Stage-06 Catalog lifecycle** интегрируется перед приёмкой зависимых search/READY/notification/create gates, а **Stage-07 voice** — перед полной E2E-приёмкой. Формулировки «сейчас доказано» в исходном gap-analysis относятся к baseline commit, а не к текущему HEAD.
 
 ## 1. Вердикт готовности и доказательная база
 
@@ -85,22 +85,50 @@
 
 ## 5. Порядок этапов и зависимости
 
+Текущий implementation order намеренно выводит реальный безопасный Telegram text pilot вперёд и откладывает Catalog lifecycle/voice, не ослабляя production acceptance gates:
+
+```text
+01 Foundation -> 02 Persistence -> 03 Audit -> 04 RBAC -> 05 Draft
+                                                        └-> 05A controlled Telegram DM text pilot
+
+после pilot evidence, Jira write всё ещё disabled:
+  08 read-only metadata/mapper
+   -> 09 duplicate core на synthetic Catalog fixtures
+   -> 10 posting/idempotency на fake transport
+   -> 11 recovery/reconciliation
+   -> 12 notification core на synthetic destinations
+
+поздняя интеграция обязательных зависимостей:
+  06 full Catalog lifecycle -> приёмка 09/12 -> 13 controlled Jira create
+  07 voice -> 15 full integrated E2E
+  13 -> 14 operations -> 15 -> 16 go-live
+```
+
+Разработка `08`, core `09`–`12` может использовать только synthetic fixtures/fake transports и не означает приёмку route-dependent gates. Stage-09 принимается только после интеграции verified active Catalog; Stage-12 — только после trusted Catalog routes; Stage-13 не начинается до полной приёмки Stages 01–12. `07-voice-whisper.md` остаётся отдельным deferred Stage-07 и не блокирует text-only pilot.
+
+Verified active **Catalog version/checksum/schema должен существовать до duplicate search acceptance, READY и любого create claim**. Stale/missing/unverified Catalog блокирует все три действия. Stage-05A не содержит обхода этого gate. Jira POST остаётся запрещённым до explicit controlled enablement Stage-13.
+
 ```text
 01 Foundation
  └─> 02 Persistence
       ├─> 03 Audit/security baseline
       │    └─> 04 RBAC
       │         └─> 05 Draft
-      │              ├─> 06 Catalog
-      │              └─> 07 Voice
-      └──────────────> 08 Jira metadata/mapper (read-only)
-06 + 08 + 04 + 05 ──> 09 Duplicate search
-03 + 04 + 05 + 08 + 09 ──> 10 Posting/idempotency (transport disabled)
+      │              └─> 05A controlled text pilot
+      │                   └─> 08 Jira metadata/mapper (read-only)
+      │                        └─> 09 core (synthetic Catalog; not accepted)
+      │                             └─> 10 Posting/idempotency (fake transport)
+      │                                  └─> 11 Recovery
+      │                                       └─> 12 notification core (synthetic routes)
+      ├────────────────────> 06 Catalog full lifecycle (deferred)
+      └────────────────────> 07 Voice (deferred before Stage 15)
+06 + 08 + 04 + 05 ──> 09 acceptance
+03 + 04 + 05 + 08 + accepted 09 ──> 10 acceptance
 10 ──> 11 Reconciliation/restart recovery
-06 + 03 + 11 ──> 12 Notifications
-08 + 09 + 10 + 11 + 12 ──> 13 Jira create enablement
+06 + 03 + 11 ──> 12 acceptance
+06 + 08 + 09 + 10 + 11 + 12 ──> 13 Jira create enablement
 13 + 02 + 03 ──> 14 Backup/deploy/operations
-all ──> 15 Integrated verification ──> 16 Go-live
+06 + 07 + 08–14 ──> 15 Integrated verification ──> 16 Go-live
 ```
 
 | № | Этап | Проверяемый результат |
@@ -110,8 +138,9 @@ all ──> 15 Integrated verification ──> 16 Go-live
 | 03 | [Audit, observability, redaction и privacy baseline](03-audit-observability-redaction.md) | Каждое последующее действие получает безопасный append-only audit и correlation semantics |
 | 04 | [RBAC и заявки доступа](04-rbac-access-requests.md) | Trusted admin decision создаёт/отзывает Creator атомарно; Guest fail closed |
 | 05 | [Draft, provenance, versioning и READY foundation](05-draft-versioning-readiness.md) | Полный Draft хранится с CAS и invalidation; READY ещё не вызывает POST |
-| 06 | [Knowledge Catalog lifecycle](06-knowledge-catalog.md) | Проверенная version/checksum/schema импортируется и атомарно активируется/откатывается |
-| 07 | [Voice и Whisper medium](07-voice-whisper.md) | Voice → reviewable transcript → versioned Draft без хранения raw audio сверх policy |
+| 05A | [Controlled live text-only pilot](05a-live-text-pilot.md) | Один trusted Telegram DM sender проверяет RBAC/Draft/restart; Jira network/POST отсутствует |
+| 06 | [Knowledge Catalog lifecycle](06-knowledge-catalog.md), deferred до поздней интеграции | Проверенная version/checksum/schema импортируется и атомарно активируется/откатывается до приёмки duplicate/READY/create |
+| 07 | [Voice и Whisper medium](07-voice-whisper.md), deferred до полной E2E-приёмки | Voice → reviewable transcript → versioned Draft без хранения raw audio сверх policy |
 | 08 | [Jira metadata и whitelist mapper](08-jira-metadata-whitelist-mapper.md) | Read-only snapshot и deterministic payload contract; network POST невозможен |
 | 09 | [Duplicate search и решение Creator](09-duplicate-search-decisions.md) | Bounded fixed-scope search, privacy boundary и version-bound decision |
 | 10 | [Posting state machine и idempotency](10-posting-idempotency-unknown.md) | Atomic claim и `UNKNOWN` invariants доказаны на fake transport; production POST выключен |
@@ -127,17 +156,18 @@ all ──> 15 Integrated verification ──> 16 Go-live
 ## 6. Глобальные инварианты для всех этапов
 
 1. Jira create остаётся отключён до приёмки этапов 1–12 и явного controlled enablement этапа 13.
-2. Модель никогда не получает direct Jira create, generic HTTP, filesystem, exec, browser, arbitrary message или config/Gateway tool.
-3. Identity, actor, chat и destination берутся только из trusted host/server-side context.
-4. Guest не видит детали Jira и не достигает duplicate detail/create transport.
-5. Любое значимое изменение Draft увеличивает version и инвалидирует READY/search/payload context.
-6. Jira payload строится только mapper allowlist; unknown field/value отклоняется.
-7. `UNKNOWN` и unsafe recovered `POSTING` никогда не вызывают automatic retry POST.
-8. Jira key/link появляются только из валидного response или доказанной manual reconciliation.
-9. Notification retry не связан с Jira create retry.
-10. Credentials, OAuth/auth-profile state, SQLite, backups, raw voice, transcripts и пользовательские данные не попадают в Git.
-11. Логи/audit не содержат raw updates, headers, credentials, полные Jira bodies/descriptions или voice payloads.
-12. Каждый этап мигрирует/откатывается или явно доказывает, почему data migration не требуется.
+2. Verified active Catalog обязателен до duplicate search, READY и create; недоступный/stale Catalog всегда блокирует их.
+3. Модель никогда не получает direct Jira create, generic HTTP, filesystem, exec, browser, arbitrary message или config/Gateway tool.
+4. Identity, actor, chat и destination берутся только из trusted host/server-side context.
+5. Guest не видит детали Jira и не достигает duplicate detail/create transport.
+6. Любое значимое изменение Draft увеличивает version и инвалидирует READY/search/payload context.
+7. Jira payload строится только mapper allowlist; unknown field/value отклоняется.
+8. `UNKNOWN` и unsafe recovered `POSTING` никогда не вызывают automatic retry POST.
+9. Jira key/link появляются только из валидного response или доказанной manual reconciliation.
+10. Notification retry не связан с Jira create retry.
+11. Credentials, OAuth/auth-profile state, SQLite, backups, raw voice, transcripts и пользовательские данные не попадают в Git.
+12. Логи/audit не содержат raw updates, headers, credentials, полные Jira bodies/descriptions или voice payloads.
+13. Каждый этап мигрирует/откатывается или явно доказывает, почему data migration не требуется.
 
 ## 7. Общие quality gates и Definition of Done
 

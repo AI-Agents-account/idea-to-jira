@@ -9,13 +9,14 @@ export type RequesterContextErrorCode =
   | "CHANNEL_DENIED"
   | "ACCOUNT_DENIED"
   | "SENDER_MISSING"
+  | "SENDER_DENIED"
   | "DESTINATION_DENIED"
   | "THREAD_DENIED";
 
 export interface TrustedRequesterContext {
   readonly agentId: "idea-mvp";
   readonly channelId: "telegram";
-  readonly accountId: "idea-mvp";
+  readonly accountId: "default";
   readonly senderId: string;
   readonly chatId: string;
 }
@@ -54,6 +55,7 @@ export function validateRequesterFacts(facts: RequesterFacts, config: EffectiveC
   if (channelId !== config.telegram.channelId) return { ok: false, code: "CHANNEL_DENIED" };
   if (accountId !== config.telegram.accountId) return { ok: false, code: "ACCOUNT_DENIED" };
   if (!numericTelegramId(senderId)) return { ok: false, code: "SENDER_MISSING" };
+  if (senderId !== config.telegram.pilotSenderId) return { ok: false, code: "SENDER_DENIED" };
   if (!numericTelegramId(chatId) || chatId !== senderId) return { ok: false, code: "DESTINATION_DENIED" };
   if (facts.threadId !== undefined && String(facts.threadId).trim().length > 0) {
     return { ok: false, code: "THREAD_DENIED" };
@@ -64,7 +66,7 @@ export function validateRequesterFacts(facts: RequesterFacts, config: EffectiveC
     context: Object.freeze({
       agentId: "idea-mvp",
       channelId: "telegram",
-      accountId: "idea-mvp",
+      accountId: "default",
       senderId,
       chatId,
     }),
@@ -117,7 +119,7 @@ export function requesterFromCommandContext(
   );
 }
 
-/** before_agent_run is the earliest confirmed OpenClaw 2026.7.1-2 typed input gate. */
+/** Sole free-form conversation identity adapter and fail-closed server gate. */
 export function requesterFromAgentRun(
   event: PluginHookBeforeAgentRunEvent,
   context: PluginHookAgentContext,

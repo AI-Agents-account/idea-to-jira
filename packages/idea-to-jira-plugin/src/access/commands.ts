@@ -5,8 +5,12 @@ import type {
 } from "openclaw/plugin-sdk/plugin-entry";
 
 import type { EffectiveConfig } from "../config.js";
-import { SafeError } from "../errors/index.js";
-import { requesterFromCommandContext } from "../runtime/requester-context.js";
+import { normalizeSafeError, SafeError, type SafeErrorCode } from "../errors/index.js";
+import {
+  requesterFromCommandContext,
+  type RequesterContextErrorCode,
+} from "../runtime/requester-context.js";
+import type { ServiceRuntimeStatus } from "../runtime/service-runtime.js";
 import {
   AccessService,
   renderAdminAccessCard,
@@ -15,6 +19,33 @@ import {
 } from "./access-service.js";
 
 const REF = /^[A-Za-z0-9_-]{20,64}$/;
+
+type AccessCommandName = "access" | "request_access";
+type AccessDiagnosticAction = "requester_validation" | "safe_failure";
+interface AccessCommandRuntime {
+  readonly config: EffectiveConfig;
+  readonly service: AccessService;
+}
+
+function logAccessDiagnostic(
+  api: OpenClawPluginApi,
+  command: AccessCommandName,
+  action: AccessDiagnosticAction,
+  code: RequesterContextErrorCode | SafeErrorCode,
+  runtimeStatus?: ServiceRuntimeStatus,
+): void {
+  try {
+    const runtime = runtimeStatus
+      ? ` runtime_phase=${runtimeStatus.phase}` +
+        ` runtime_generation=${runtimeStatus.generation}` +
+        ` latest_generation=${runtimeStatus.latestGeneration}` +
+        ` runtime_instance=${runtimeStatus.instanceId ? "present" : "absent"}`
+      : "";
+    api.logger.warn(`idea-to-jira access command=${command} action=${action} code=${code}${runtime}`);
+  } catch {
+    // Diagnostics must not alter the command's fail-closed response.
+  }
+}
 
 function reply(text: string): PluginCommandResult {
   return { text };
@@ -34,10 +65,9 @@ function safeFailure(error: unknown): PluginCommandResult {
   return reply("This request is unavailable.");
 }
 
-function requiredService(getService: () => AccessService | undefined): AccessService {
-  const service = getService();
-  if (!service) throw new SafeError("STORAGE_NOT_READY", false);
-  return service;
+function requiredRuntime(runtime: AccessCommandRuntime | undefined): AccessCommandRuntime {
+  if (!runtime) throw new SafeError("STORAGE_NOT_READY", false);
+  return runtime;
 }
 
 function parseVersion(value: string | undefined): number | undefined {
@@ -135,20 +165,26 @@ function formatRole(result: ReturnType<AccessService["transitionRole"]>): string
 
 export function registerAccessCommands(
   api: OpenClawPluginApi,
-  config: EffectiveConfig,
-  getService: () => AccessService | undefined,
+  registrationConfig: EffectiveConfig,
+  getRuntime: () => AccessCommandRuntime | undefined,
+  getRuntimeStatus: () => ServiceRuntimeStatus,
 ): void {
   api.registerCommand({
     name: "request_access",
     description: "Request Creator access or show the existing request status.",
-    channels: [config.telegram.channelId],
+    channels: [registrationConfig.telegram.channelId],
     acceptsArgs: false,
     requireAuth: false,
     async handler(context) {
       try {
+        const resolved = getRuntime();
+        const config = resolved?.config ?? registrationConfig;
         const requester = requesterFromCommandContext(context, config);
-        if (!requester.ok) return reply("This request is unavailable.");
-        const result = requiredService(getService).requestAccess(requester.context);
+        if (!requester.ok) {
+          logAccessDiagnostic(api, "request_access", "requester_validation", requester.code);
+          return reply("This request is unavailable.");
+        }
+        const result = requiredRuntime(resolved).service.requestAccess(requester.context);
         if (result.created && result.adminCard) {
           try {
             await notifyAdmins(api, context, config, renderAdminAccessCard(result.adminCard));
@@ -159,6 +195,14 @@ export function registerAccessCommands(
         }
         return reply(`Access request already exists.\n${formatStatus(result.status)}`);
       } catch (error) {
+        const code = normalizeSafeError(error).code;
+        logAccessDiagnostic(
+          api,
+          "request_access",
+          "safe_failure",
+          code,
+          code === "STORAGE_NOT_READY" ? getRuntimeStatus() : undefined,
+        );
         return safeFailure(error);
       }
     },
@@ -167,14 +211,19 @@ export function registerAccessCommands(
   api.registerCommand({
     name: "access",
     description: "Show access status or perform an allowlisted Business Admin transition.",
-    channels: [config.telegram.channelId],
+    channels: [registrationConfig.telegram.channelId],
     acceptsArgs: true,
     requireAuth: false,
     async handler(context) {
       try {
+        const resolved = getRuntime();
+        const config = resolved?.config ?? registrationConfig;
         const requester = requesterFromCommandContext(context, config);
-        if (!requester.ok) return reply("This request is unavailable.");
-        const service = requiredService(getService);
+        if (!requester.ok) {
+          logAccessDiagnostic(api, "access", "requester_validation", requester.code);
+          return reply("This request is unavailable.");
+        }
+        const service = requiredRuntime(resolved).service;
         const parsed = parseActionArgs(context.args);
         if (parsed.action === "status") return reply(formatStatus(service.ensureUser(requester.context)));
         if (!parsed.ref || parsed.version === undefined) {
@@ -206,6 +255,14 @@ export function registerAccessCommands(
         }
         return reply("Unknown access action.");
       } catch (error) {
+        const code = normalizeSafeError(error).code;
+        logAccessDiagnostic(
+          api,
+          "access",
+          "safe_failure",
+          code,
+          code === "STORAGE_NOT_READY" ? getRuntimeStatus() : undefined,
+        );
         return safeFailure(error);
       }
     },

@@ -1,8 +1,8 @@
 import { statSync } from "node:fs";
 
-import { openPluginDatabase } from "/app/extensions/idea-to-jira-plugin/dist/src/storage/database.js";
+import { openPluginDatabase } from "/opt/openclaw-plugins/idea-to-jira/dist/src/storage/database.js";
 
-const stateDir = process.env.IDEA_TO_JIRA_STORAGE_CHECK_DIR ?? "/home/node/.openclaw/plugin-state/container-check";
+const stateDir = process.env.IDEA_TO_JIRA_STORAGE_CHECK_DIR ?? "/home/node/plugin-state/container-check";
 const expectedDirectoryMode = 0o700;
 const expectedFileMode = 0o600;
 

@@ -1,15 +1,21 @@
 {
   agents: {
     defaults: {
-      workspace: "/home/node/.openclaw/workspace",
+      workspace: "/home/node/workspace",
       skipBootstrap: true,
+      heartbeat: {
+        every: "0m",
+      },
+      model: {
+        primary: "${OPENAI_MODEL}",
+      },
     },
     list: [
       {
         id: "idea-mvp",
         default: true,
         name: "Idea-to-Jira MVP",
-        workspace: "/home/node/.openclaw/workspace",
+        workspace: "/home/node/workspace",
         tools: {
           allow: [
             "idea_to_jira_create_draft",
@@ -22,6 +28,11 @@
       },
     ],
   },
+  tools: {
+    media: {
+      audio: { enabled: false },
+    },
+  },
   session: {
     dmScope: "per-account-channel-peer",
   },
@@ -30,23 +41,26 @@
       agentId: "idea-mvp",
       match: {
         channel: "telegram",
-        accountId: "idea-mvp",
+        accountId: "default",
       },
     },
   ],
   channels: {
     telegram: {
       enabled: true,
-      defaultAccount: "idea-mvp",
-      dmPolicy: "open",
-      allowFrom: ["*"],
+      // TELEGRAM_BOT_TOKEN is OpenClaw's implicit `default` account credential.
+      // Use that same canonical account id so the env fallback cannot create a
+      // second poller for the same bot token.
+      defaultAccount: "default",
+      dmPolicy: "allowlist",
+      allowFrom: ["${TELEGRAM_PILOT_SENDER_ID}"],
       groupPolicy: "disabled",
       accounts: {
-        "idea-mvp": {
+        default: {
           enabled: true,
           botToken: "${TELEGRAM_BOT_TOKEN}",
-          dmPolicy: "open",
-          allowFrom: ["*"],
+          dmPolicy: "allowlist",
+          allowFrom: ["${TELEGRAM_PILOT_SENDER_ID}"],
           groupPolicy: "disabled",
         },
       },
@@ -61,14 +75,15 @@
       "idea-to-jira": {
         enabled: true,
         hooks: {
-          // Required by OpenClaw 2026.7.1-2 for the typed before_agent_run gate.
+          // Required by OpenClaw 2026.7.1-2 for the typed pre-model conversation gates.
           allowConversationAccess: true,
         },
         config: {
           agentId: "idea-mvp",
           telegram: {
             channelId: "telegram",
-            accountId: "idea-mvp",
+            accountId: "default",
+            pilotSenderIdEnv: "TELEGRAM_PILOT_SENDER_ID",
             adminSenderIdsEnv: "BUSINESS_ADMIN_TELEGRAM_IDS",
           },
           notifications: {
@@ -84,7 +99,7 @@
             writeMode: "disabled",
           },
           catalog: {
-            path: "/home/node/.openclaw/workspace/knowledge/catalog.md",
+            path: "/app/knowledge/catalog.md",
             schemaVersion: 1,
             sha256: "59fae2568168a4859458763ca08dbe9c5e35af81481553e336faec6cd3a2501b",
           },
@@ -106,7 +121,7 @@
             draftDays: 90,
             auditDays: 365,
           },
-          stateDir: "/home/node/.openclaw/plugin-state/idea-to-jira",
+          stateDir: "/home/node/plugin-state/idea-to-jira",
         },
       },
     },

@@ -10,7 +10,8 @@ export function validRawConfig(): Record<string, unknown> {
     agentId: "idea-mvp",
     telegram: {
       channelId: "telegram",
-      accountId: "idea-mvp",
+      accountId: "default",
+      pilotSenderIdEnv: "TELEGRAM_PILOT_SENDER_ID",
       adminSenderIdsEnv: "BUSINESS_ADMIN_TELEGRAM_IDS",
     },
     notifications: {
@@ -46,7 +47,7 @@ export function validRawConfig(): Record<string, unknown> {
 
 export const validEnvironment = {
   JIRA_BASE_URL: "https://jira.example.test",
-  JIRA_TOKEN: "test-only-token",
+  TELEGRAM_PILOT_SENDER_ID: "123456789",
   BUSINESS_ADMIN_TELEGRAM_IDS: "123456789,987654321",
   PRODUCT_OWNER_TELEGRAM_IDS: "111222333",
 };

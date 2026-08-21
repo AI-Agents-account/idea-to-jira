@@ -8,7 +8,7 @@ import { effectiveConfig } from "./config-fixture.js";
 const requester: TrustedRequesterContext = {
   agentId: "idea-mvp",
   channelId: "telegram",
-  accountId: "idea-mvp",
+  accountId: "default",
   senderId: "123456789",
   chatId: "123456789",
 };

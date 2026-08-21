@@ -28,6 +28,19 @@ jobs:
         run: npm run build
       - name: Verify create readiness is fail-closed
         run: npm run verify:create-disabled
+      - name: Verify Stage-05A pilot structure without external calls
+        env:
+          HOME: ${{ runner.temp }}/idea-to-jira-pilot-validation
+          OPENCLAW_CONFIG_PATH: ${{ github.workspace }}/config/openclaw.json5
+          IDEA_TO_JIRA_PLUGIN_PATH: ${{ github.workspace }}/packages/idea-to-jira-plugin
+          OPENCLAW_GATEWAY_TOKEN: ci-placeholder-gateway-token
+          TELEGRAM_BOT_TOKEN: ci-placeholder-telegram-token
+          TELEGRAM_PILOT_SENDER_ID: "123456789"
+          OPENAI_MODEL: openai/pilot-structural-fixture
+          JIRA_BASE_URL: https://jira.example.test
+          BUSINESS_ADMIN_TELEGRAM_IDS: "123456789"
+          PRODUCT_OWNER_TELEGRAM_IDS: "987654321"
+        run: npm run verify:pilot-structure
       - name: Validate OpenClaw configuration
         env:
           HOME: ${{ runner.temp }}/idea-to-jira-openclaw-validation
@@ -35,8 +48,9 @@ jobs:
           IDEA_TO_JIRA_PLUGIN_PATH: ${{ github.workspace }}/packages/idea-to-jira-plugin
           OPENCLAW_GATEWAY_TOKEN: ci-placeholder-gateway-token
           TELEGRAM_BOT_TOKEN: ci-placeholder-telegram-token
+          TELEGRAM_PILOT_SENDER_ID: "123456789"
+          OPENAI_MODEL: openai/pilot-structural-fixture
           JIRA_BASE_URL: https://jira.example.test
-          JIRA_TOKEN: ci-placeholder-jira-token
           BUSINESS_ADMIN_TELEGRAM_IDS: "123456789"
           PRODUCT_OWNER_TELEGRAM_IDS: "987654321"
         run: npm exec -- openclaw config validate
@@ -54,7 +68,7 @@ jobs:
           sudo chmod 0700 data/plugin-state
           docker run --rm --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
-            --mount type=bind,src="$PWD/data/plugin-state",dst=/home/node/.openclaw/plugin-state \
+            --mount type=bind,src="$PWD/data/plugin-state",dst=/home/node/plugin-state \
             --entrypoint node "$image" /app/scripts/storage-container-check.mjs
 
   secret-scan:
