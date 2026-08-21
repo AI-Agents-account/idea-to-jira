@@ -1,16 +1,4 @@
-export interface IdeaInput {
-  summary: string;
-  problem: string;
-  desiredOutcome: string;
-  evidence?: readonly string[];
-  labels?: readonly string[];
-}
+import type { CreateDraftInput } from "./draft.js";
 
-export interface JiraIssueDraft {
-  status: "ready";
-  projectKey: string;
-  issueType: "Feature";
-  summary: string;
-  description: string;
-  labels: string[];
-}
+/** Legacy intake name retained only as a source-compatible normalization boundary. */
+export type IdeaInput = CreateDraftInput;

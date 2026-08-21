@@ -25,7 +25,7 @@ The effective `stateDir` comes from validated server-side configuration. It is n
 
 Container deployments must ensure the bind-mounted `data/plugin-state` path is owned by the UID/GID used by the target image. CI discovers that identity from the built image instead of assuming a host UID.
 
-## 3. Storage schema v3
+## 3. Storage schema v4
 
 Migration `001_initial_schema` creates the domain schema v1:
 
@@ -57,6 +57,8 @@ Payload hashes and local operation IDs are local consistency keys only. They are
 Migration `002_audit_observability_baseline` advances the storage schema to version 2. It adds versioned audit correlation/correction/retention fields and record-level retention classes without changing legacy actor/outcome values. Existing audit rows are marked `LEGACY`, keep unknown correlation fields `NULL`, and retain their original actor/outcome. New application writes go only through `SqliteAuditWriter`; `AuditedCriticalOperation` makes a critical mutation and audit insert one transaction. The full contract is in [`AUDIT_OBSERVABILITY.md`](AUDIT_OBSERVABILITY.md).
 
 Migration `003_rbac_access_requests` advances the schema to version 3. It adds bounded untrusted identity snapshots and decision reasons, creates/backfills unique opaque action references, rejects later missing action references, and replaces active-only role uniqueness with a live-grant constraint covering both `ACTIVE` and `SUSPENDED`. It does not infer or backfill Creator grants. Access/role transitions and recovery behavior are documented in [`RBAC_ACCESS.md`](RBAC_ACCESS.md).
+
+Migration `004_draft_versioning_readiness` advances the schema to version 4. It adds Draft/domain schema and formatter versions, full per-field content/provenance JSON, dependency snapshots, completeness/readiness reasons, actor/timestamps for immutable versions, operation invalidation metadata, active-Draft and owner indexes, and posting-operation lookup indexes. Existing synthetic Stage-01 Draft rows are backfilled as incomplete/unverified schema-v1 versions; no user confirmation, Catalog proof or READY state is invented. Runtime patch/cancel uses `head_version` plus `record_version` CAS in one `BEGIN IMMEDIATE` transaction, while every historical `draft_versions` row remains immutable. The semantic contract and recovery rules are documented in [`DRAFT_VERSIONING.md`](DRAFT_VERSIONING.md).
 
 ## 4. Migration contract
 
@@ -93,7 +95,7 @@ A failed check disables the plugin's request/tool surface with a stable non-secr
 
 Use the repository unit-of-work boundary for reads and writes. The mutable `DatabaseSync` connection is private to the storage module and is not returned to callers. Transaction sessions accept only static application `SELECT`/`INSERT`/`UPDATE`/`DELETE`/`WITH` statements; PRAGMA, DDL and transaction control are denied. A callback must be synchronous; do not hold SQLite transactions across Jira, model, STT, Telegram or filesystem network work.
 
-Critical role/posting transactions require `synchronous=FULL` and `BEGIN IMMEDIATE`. Concurrent writers receive a bounded busy/locked failure. Operation claiming is an insert with the unique operation key, so only one committed claim can win. Draft head updates use `record_version` in the `WHERE` clause; zero changed rows means a stale writer and must not be overwritten silently.
+Critical role/posting/Draft-version transactions require `synchronous=FULL` and `BEGIN IMMEDIATE`. Concurrent writers receive a bounded busy/locked failure. Operation claiming is an insert with the unique operation key, so only one committed claim can win. Draft head updates use both `head_version` and `record_version` in the `WHERE` clause; zero changed rows means a stale writer and produces `DRAFT_CONFLICT` without overwriting the winner.
 
 ## 7. Backup and restore
 

@@ -1,41 +1,43 @@
 # Idea-to-Jira
 
-**Статус: production-oriented scaffold, не готовый MVP; Jira write отключён, реализованы typed draft validation, Stage-02 SQLite foundation, Stage-03 audit/redaction baseline и Stage-04 RBAC/access requests.**
+**Статус: production-oriented scaffold, не готовый MVP; Jira write отключён, реализованы Stage-01 runtime/security, Stage-02 SQLite, Stage-03 audit/redaction, Stage-04 RBAC и Stage-05 versioned Draft/readiness foundation.**
 
 Репозиторий задаёт ориентированный на production каркас выделенного Telegram-бота и выделенного агента OpenClaw. Целевая система должна помогать автору структурировать продуктовую идею, безопасно проверять роль и дубли и создавать Jira `Feature` в фиксированном контуре. Сейчас этот процесс существует только как требования и целевая архитектура: запуск контейнера не даёт готовый пользовательский MVP и не должен получать production-трафик.
 
 ## Что реализовано сейчас
 
 - корневой npm workspace и пакет плагина `@idea-to-jira/openclaw-plugin`;
-- typed tool `idea_to_jira_validate_draft`, который принимает `summary`, `problem`, `desiredOutcome`, необязательные `evidence` и `labels`;
-- проверка обязательных строк, обрезка пробелов, дедупликация списков и детерминированная сборка Draft для `Feature`;
+- узкие typed tools для create/read/CAS-patch/cancel собственного Draft и access request; прямой Jira create отсутствует;
+- versioned Draft schema v1 с immutable versions, per-field provenance, owner predicate, active-Draft limit и audit;
+- строгая нормализация/валидация, bounded question policy и детерминированный JC-004 formatter из восьми секций;
+- pure fail-closed completeness/readiness evaluator с versioned Catalog/transcript/metadata/duplicate/operation proofs и без transport;
 - единая startup-валидация runtime-конфигурации: Telegram account/channel, фиксированный Jira scope, protected env refs, Catalog schema/checksum, allowlist, STT, rate/retention limits и runtime paths;
 - fail-closed `before_agent_run` gate и tool-factory gate по trusted OpenClaw context: только user-triggered Telegram DM, agent/account `idea-mvp`, numeric sender и destination, равный sender;
 - process-local token-bucket interface, payload limit и fail-closed security gates;
 - versioned typed audit envelope, append-only SQLite writer, атомарный audited-operation boundary, safe error taxonomy и централизованная drop-by-default redaction;
 - structured log contract, bounded metric/alert interfaces, раздельные local correlation IDs, retention metadata и access-controlled sanitized audit export;
 - явный create-disabled readiness signal и `DisabledJiraIssueClient`: Jira write остаётся недоступен;
-- plugin-owned SQLite schema v3, transactional checksum-guarded migrations, WAL/FK/FULL durability policy, private file modes, startup consistency gate, unit-of-work и online backup primitive;
+- plugin-owned SQLite schema v4, transactional checksum-guarded migrations, versioned Draft backfill, WAL/FK/FULL durability policy, private file modes, startup consistency gate, unit-of-work и online backup primitive;
 - durable Guest/Pending/Creator/Suspended/Blocked lifecycle, idempotent access requests, allowlisted Business Admin decisions and Creator grant suspend/restore/revoke/block with CAS/anti-replay;
 - typed `/request_access` and `/access` command handlers, fixed server-side Admin destinations, content-free access cards and reusable own-Draft/active-Creator authorization checks;
 - unit/security/config/deployment/storage-тесты, TypeScript type-check, JSON/OpenClaw validators и CI;
 - Dockerfile и Compose-каркас выделенного OpenClaw Gateway/CLI с постоянными томами и ограничениями контейнера;
-- OpenClaw-конфигурация с отдельным агентом, Telegram DM, peer-scoped сессиями и allowlist из единственного реализованного plugin tool;
+- OpenClaw-конфигурация с отдельным агентом, Telegram DM, peer-scoped сессиями и allowlist только из пяти реализованных plugin tools;
 - заготовка Knowledge Catalog, намеренно неполная и не пригодная для production-маршрутизации.
 
 ## Что ещё не реализовано
 
-- полноценный Telegram-диалог и repository implementation поверх уже созданных таблиц версионированного Draft;
+- полноценная разговорная orchestration поверх реализованных Draft tools;
 - приём и локальная транскрипция voice через Whisper `medium`, показ и коррекция транскрипта;
 - Catalog/posting repositories, retention execution, production alert routing и backup scheduling/operations;
 - проверяемый импорт и обновление Knowledge Catalog;
 - bounded duplicate search и решение Creator по найденным кандидатам;
-- READY predicate, атомарный operation claim и идемпотентность;
+- подключение live Catalog/metadata/duplicate proofs к реализованному READY predicate, атомарный operation claim и posting orchestration;
 - Jira payload mapper по allowlist, POST, обработка ответа и ручная reconciliation состояния `UNKNOWN`;
 - уведомления автору, Business Admin и Product Owner;
 - production monitoring backend/dashboards, destination routing, runbooks, security/integration/E2E и performance evidence.
 
-Целевые возможности и принятые ограничения описаны в [бизнес-требованиях](docs/BUSINESS_REQUIREMENTS.md), [функциональных требованиях](docs/FUNCTIONAL_REQUIREMENTS.md), [нефункциональных требованиях](docs/NON_FUNCTIONAL_REQUIREMENTS.md), [контракте Jira create](docs/JIRA_CREATE_CONTRACT.md) и [журнале решений](docs/DECISIONS.md). Storage contract, migration/recovery и проверка backup описаны в [руководстве по persistence](docs/STORAGE.md), audit/redaction/telemetry contract — в [Stage-03 baseline](docs/AUDIT_OBSERVABILITY.md), а RBAC/access lifecycle и фактическая OpenClaw command boundary — в [Stage-04 contract](docs/RBAC_ACCESS.md). Текущее и целевое состояние разведены в [архитектуре](ARCHITECTURE.md). Полная последовательность оставшейся реализации и quality gates собрана в [декомпозиции задач](docs/tasks/README.md).
+Целевые возможности и принятые ограничения описаны в [бизнес-требованиях](docs/BUSINESS_REQUIREMENTS.md), [функциональных требованиях](docs/FUNCTIONAL_REQUIREMENTS.md), [нефункциональных требованиях](docs/NON_FUNCTIONAL_REQUIREMENTS.md), [контракте Jira create](docs/JIRA_CREATE_CONTRACT.md) и [журнале решений](docs/DECISIONS.md). Storage contract, migration/recovery и проверка backup описаны в [руководстве по persistence](docs/STORAGE.md), audit/redaction/telemetry contract — в [Stage-03 baseline](docs/AUDIT_OBSERVABILITY.md), RBAC/access lifecycle — в [Stage-04 contract](docs/RBAC_ACCESS.md), а фактические Draft schema/provenance/CAS/readiness/tool contracts — в [Stage-05 contract](docs/DRAFT_VERSIONING.md). Текущее и целевое состояние разведены в [архитектуре](ARCHITECTURE.md). Полная последовательность оставшейся реализации и quality gates собрана в [декомпозиции задач](docs/tasks/README.md).
 
 ## Роли целевой системы
 

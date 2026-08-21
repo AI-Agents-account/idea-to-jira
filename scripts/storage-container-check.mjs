@@ -40,4 +40,4 @@ assertRuntimeOwner(stateDir);
 assertRuntimeOwner(databasePath);
 storage.close();
 
-console.log("storage-container-check: schema=3 journal=wal modes=private restart=ok");
+console.log("storage-container-check: schema=4 journal=wal modes=private restart=ok");

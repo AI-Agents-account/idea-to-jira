@@ -1,6 +1,6 @@
 # Декомпозиция реализации production-ready MVP
 
-**Статус:** implementation baseline после анализа требований и scaffold на commit `83ac30114028c9165960dd1189a9550e8aeda903`
+**Статус:** исторический implementation baseline после анализа scaffold на commit `83ac30114028c9165960dd1189a9550e8aeda903`; фактические Stage-02—05 контракты фиксируются в профильных документах
 
 **Дата анализа:** 2026-08-20
 
@@ -8,9 +8,11 @@
 
 Этот каталог превращает нормативные требования в последовательность вертикальных этапов. Каждый файл — самостоятельный brief для отдельной инженерной сессии: с границами, конкретными компонентами, атомарными задачами, тестами и проверяемым выходом. Это план реализации, а не свидетельство готовности функций. Указанные новые файлы и каталоги — целевые пути внутри `packages/idea-to-jira-plugin/` и `docs/`; их наличие в brief не означает, что они уже реализованы.
 
+> Обновление 2026-08-21: Stage-01—05 реализованы последовательно; текущие доказательства описаны в `README.md`, `ARCHITECTURE.md`, `docs/STORAGE.md`, `docs/AUDIT_OBSERVABILITY.md`, `docs/RBAC_ACCESS.md` и `docs/DRAFT_VERSIONING.md`. Ниже сохранён исходный gap-analysis, поэтому формулировки «сейчас доказано» относятся к указанному baseline commit, а не к текущему HEAD.
+
 ## 1. Вердикт готовности и доказательная база
 
-Репозиторий является корректно обозначенным **production-oriented scaffold**, но не MVP. Сейчас доказаны только:
+На исходном baseline commit репозиторий являлся корректно обозначенным **production-oriented scaffold**, но не MVP. Тогда были доказаны только:
 
 - загрузочная структура mixed plugin и один typed tool `idea_to_jira_validate_draft`;
 - нормализация трёх обязательных строк и дедупликация `evidence`/`labels` в памяти;
@@ -21,7 +23,7 @@
 - peer-scoped DM-конфигурация с allowlist единственного существующего tool;
 - неполная fail-closed заготовка Catalog.
 
-Не доказаны RBAC, сохранение состояния, полноценный Draft, Whisper, Catalog import, Jira metadata/read/write, duplicate search, идемпотентность, `UNKNOWN`, reconciliation, уведомления, audit, retention, backup/restore и production readiness. До завершения этапа 13 Jira POST остаётся физически и конфигурационно выключенным.
+На baseline commit не были доказаны RBAC, сохранение состояния, полноценный Draft, Whisper, Catalog import, Jira metadata/read/write, duplicate search, идемпотентность, `UNKNOWN`, reconciliation, уведомления, audit, retention, backup/restore и production readiness. До завершения этапа 13 Jira POST остаётся физически и конфигурационно выключенным.
 
 Нормативная база анализируется как единый набор: [README](../../README.md), [архитектура](../../ARCHITECTURE.md), [бизнес-требования](../BUSINESS_REQUIREMENTS.md), [функциональные требования](../FUNCTIONAL_REQUIREMENTS.md), [нефункциональные требования](../NON_FUNCTIONAL_REQUIREMENTS.md), [контракт Jira create](../JIRA_CREATE_CONTRACT.md), [решения](../DECISIONS.md), исходники, тесты, plugin manifest, OpenClaw config, Dockerfile, Compose и scripts.
 

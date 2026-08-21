@@ -10,21 +10,25 @@ async function text(path: string): Promise<string> {
   return readFile(resolve(root, path), "utf8");
 }
 
-test("manifest and host config expose exactly the single stage-01 tool", async () => {
+test("manifest and host config expose only the Stage-05 typed Draft/access tools", async () => {
+  const expected = [
+    "idea_to_jira_create_draft",
+    "idea_to_jira_read_draft",
+    "idea_to_jira_patch_draft",
+    "idea_to_jira_cancel_draft",
+    "idea_to_jira_request_access",
+  ];
   const manifest = JSON.parse(await text("packages/idea-to-jira-plugin/openclaw.plugin.json"));
-  assert.deepEqual(manifest.contracts.tools, ["idea_to_jira_validate_draft"]);
+  assert.deepEqual(manifest.contracts.tools, expected);
   assert.equal(manifest.configSchema.properties.jira.properties.writeMode.const, "disabled");
+  assert.equal(manifest.configSchema.properties.limits.properties.activeDrafts.maximum, 100);
 
   const openclawConfig = await text("config/openclaw.json5");
-  const allowlists = [...openclawConfig.matchAll(/allowedTools:\s*\[([^\]]*)\]|allow:\s*\[([^\]]*)\]/g)]
-    .map((match) => match[1] ?? match[2] ?? "")
-    .filter((value) => value.includes("idea_to_jira_validate_draft"));
-  assert.equal(allowlists.length, 2);
-  for (const allowlist of allowlists) {
-    assert.match(allowlist, /^\s*"idea_to_jira_validate_draft"\s*,?\s*$/);
+  for (const tool of expected) {
+    assert.equal(openclawConfig.split(`"${tool}"`).length - 1, 2);
   }
   for (const forbidden of ["exec", "browser", "web_fetch", "web_search", "message", "jira_create"]) {
-    assert.doesNotMatch(openclawConfig, new RegExp(`tools:[\\s\\S]{0,120}\\b${forbidden}\\b`));
+    assert.doesNotMatch(openclawConfig, new RegExp(`tools:[\\s\\S]{0,700}\\b${forbidden}\\b`));
   }
 });
 
@@ -53,7 +57,7 @@ test("target-container storage verification is wired into the image and CI", asy
   assert.match(workflow, /storage-container-check\.mjs/);
   assert.doesNotMatch(workflow, /compose[^\n]*run[^\n]*--no-deps/);
   assert.match(storageCheck, /openPluginDatabase/);
-  assert.match(storageCheck, /schema=3 journal=wal modes=private restart=ok/);
+  assert.match(storageCheck, /schema=4 journal=wal modes=private restart=ok/);
 });
 
 test("health and create-readiness are separate signals", async () => {
