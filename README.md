@@ -116,11 +116,11 @@ cp .env.example .env
 | `TELEGRAM_PILOT_SENDER_ID` | Единственный numeric Telegram sender ID для controlled DM pilot; тот же ID повторно проверяет plugin runtime. |
 | `OPENAI_MODEL` | Reviewed canonical route `openai/<available-model>` для агента. Placeholder из `.env.example` не live-ready. |
 | `JIRA_BASE_URL` | HTTPS origin целевой Jira без публикации внутреннего адреса в документации. |
-| Jira credential | Не добавлять в `.env`. Положить token в ignored-файл `data/secrets/jira-token` с mode `0600`; без файла Draft работает, а Jira workflow недоступен. |
+| Jira credential | Не добавлять в `.env`. Положить Jira PAT (значение Bearer token, без префикса `Bearer`) в ignored-файл `data/secrets/jira-token` с mode `0600`; без файла Draft работает, а Jira workflow недоступен. |
 | `BUSINESS_ADMIN_TELEGRAM_IDS` | Разделённые запятыми numeric sender IDs доверенных администраторов. Controlled one-actor pilot требует включить `TELEGRAM_PILOT_SENDER_ID`; только allowlisted host-derived IDs могут выполнять Stage-04 transitions. |
 | `PRODUCT_OWNER_TELEGRAM_IDS` | Server-side allowlist numeric Telegram destinations для будущих PO notifications; startup проверяет формат и непустое значение. |
 
-Jira MVP задаёт в plugin/deployment config Jira URL, project key, issue-type name, fixed JQL, список читаемых issue fields и bounds; numeric Jira IDs/schema получаются только при startup/refresh. Create доступен лишь после discovery, duplicate decision, dynamic-field validation, exact preview и actor/chat/version-bound confirmation. Credential остаётся runtime file-secret и не попадает в effective config, Git, SQLite, audit или model context.
+Jira MVP задаёт в plugin/deployment config Jira URL, project key, issue-type name, fixed JQL, список читаемых issue fields и bounds; numeric Jira IDs/schema получаются только при startup/refresh. Create доступен только активному Creator после discovery, duplicate decision, dynamic-field validation, exact preview и actor/chat/version-bound confirmation. Credential остаётся runtime file-secret и не попадает в effective config, Git, SQLite, audit или model context.
 
 Сгенерировать Gateway token можно локально одним из способов:
 
@@ -156,7 +156,7 @@ Compose использует `.env` только для интерполяции
 ./scripts/pilot-up.sh
 ```
 
-На хосте нужны только Docker и Docker Compose v2; локальные Node.js и npm не требуются. Скрипт проверяет Compose, собирает image, валидирует инжектированный environment внутри Node-enabled контейнера, поднимает Gateway, предлагает интерактивный OpenAI device-code OAuth при отсутствии сохранённого OAuth-профиля, перезапускает Gateway после входа и запускает health/pilot/create-disabled gates. При любой ошибке после старта Gateway автоматически останавливается. Повторный запуск использует OAuth-профиль из persistent mounts и не требует нового входа.
+На хосте нужны только Docker и Docker Compose v2; локальные Node.js и npm не требуются. Скрипт проверяет Compose, собирает image, валидирует инжектированный environment внутри Node-enabled контейнера, поднимает Gateway, предлагает интерактивный OpenAI device-code OAuth при отсутствии сохранённого OAuth-профиля, перезапускает Gateway после входа и запускает health/pilot/create-contract gates. При любой ошибке после старта Gateway автоматически останавливается. Повторный запуск использует OAuth-профиль из persistent mounts и не требует нового входа.
 
 Если Node.js/npm всё же установлены, доступен эквивалентный alias `npm run pilot:up`. Development preflight (`scripts/preflight.sh`) остаётся отдельной проверкой исходников и не требуется для операторского запуска уже проверенной ревизии.
 

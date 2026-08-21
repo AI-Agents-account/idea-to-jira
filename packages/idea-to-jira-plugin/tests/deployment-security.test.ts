@@ -31,6 +31,10 @@ test("manifest and host config expose only typed Draft/access/Jira workflow tool
   assert.equal(manifest.configSchema.properties.limits.properties.activeDrafts.maximum, 100);
 
   const openclawConfig = await text("config/openclaw.json5");
+  const pluginSource = await text("packages/idea-to-jira-plugin/src/index.ts");
+  assert.match(pluginSource, /decision\.allowed && decision\.via === "ACTIVE_CREATOR"/);
+  assert.match(pluginSource, /questionId: text\(128\)/);
+  assert.doesNotMatch(pluginSource, /fieldId: text\(128\)/);
   assert.match(openclawConfig, /dmPolicy: "allowlist"/);
   assert.match(openclawConfig, /allowFrom: \["\$\{TELEGRAM_PILOT_SENDER_ID\}"\]/);
   assert.doesNotMatch(openclawConfig, /dmPolicy: "open"|allowFrom: \["\*"\]/);

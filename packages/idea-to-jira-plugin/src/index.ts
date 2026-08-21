@@ -541,9 +541,9 @@ const plugin = {
         description: "Search only the deployment-configured JQL/fields and produce a version-bound duplicate decision.",
         parameters: jiraDraftParameters,
         execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
-          const draft = runtime.draftService.readDraft(currentRequester.context, (input as { draftId: string }).draftId).draft;
           if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
           if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          const draft = runtime.draftService.readDraft(currentRequester.context, (input as { draftId: string }).draftId).draft;
           return runtime.jiraWorkflow.searchDuplicates(draft);
         }),
       };
@@ -561,9 +561,9 @@ const plugin = {
         parameters: jiraAnswerParameters,
         execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
           const answer = input as { draftId: string; questionId: string; value: string | number | readonly string[] };
-          const draft = runtime.draftService.readDraft(currentRequester.context, answer.draftId).draft;
           if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
           if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          const draft = runtime.draftService.readDraft(currentRequester.context, answer.draftId).draft;
           return runtime.jiraWorkflow.answerField(draft, answer.questionId, answer.value);
         }),
       };
@@ -581,9 +581,9 @@ const plugin = {
         parameters: jiraPreviewParameters,
         execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
           const value = input as { draftId: string; explicitProceed?: boolean };
-          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
           if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
           if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
           return runtime.jiraWorkflow.preview(draft, value.explicitProceed === true);
         }),
       };
@@ -601,9 +601,9 @@ const plugin = {
         parameters: jiraConfirmParameters,
         execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
           const value = input as { draftId: string; explicitProceed?: boolean };
-          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
           if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
           if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
           return runtime.jiraWorkflow.confirm(draft, currentRequester.context.senderId, currentRequester.context.chatId, value.explicitProceed === true);
         }),
       };
@@ -621,9 +621,9 @@ const plugin = {
         parameters: jiraCreateParameters,
         execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
           const value = input as { draftId: string; confirmationId: string; explicitProceed?: boolean };
-          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
           if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
           if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
           return runtime.jiraWorkflow.create(draft, currentRequester.context.senderId, currentRequester.context.chatId, value.confirmationId, value.explicitProceed === true);
         }),
       };
