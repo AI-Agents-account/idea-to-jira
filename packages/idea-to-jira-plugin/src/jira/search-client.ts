@@ -7,7 +7,9 @@ import { JiraFailure, type JiraCandidate, type JiraMetadataSnapshot, type JiraSe
 
 type Json = Record<string, unknown>;
 function record(value: unknown): Json | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Json : undefined; }
-function key(value: unknown): string | undefined { return typeof value === "string" && /^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/.test(value) ? value : undefined; }
+function key(value: unknown, projectKey: string): string | undefined {
+  return typeof value === "string" && value.startsWith(`${projectKey}-`) && /^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/.test(value) ? value : undefined;
+}
 function sanitize(value: unknown, depth = 0): unknown {
   if (depth > 4) return "[TRUNCATED]";
   if (typeof value === "string") return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").slice(0, 4_000);
@@ -55,13 +57,14 @@ export class JiraSearchClient {
         if (!issues || total === undefined) throw new JiraFailure("JIRA_MALFORMED");
         for (const raw of issues) {
           if (candidates.length >= this.config.search.maxResults) break;
-          const issue = record(raw); const issueKey = key(issue?.key); const rawFields = record(issue?.fields);
+          const issue = record(raw); const issueKey = key(issue?.key, this.config.projectKey); const rawFields = record(issue?.fields);
           if (!issueKey || !rawFields) throw new JiraFailure("JIRA_MALFORMED");
           const allowed = Object.fromEntries(this.config.search.fields.filter((name) => name !== "key").map((name) => [name, sanitize(rawFields[name])]));
           candidates.push(Object.freeze({ key: issueKey, fields: Object.freeze(allowed) }));
         }
         startAt += issues.length;
-        if (issues.length === 0 || startAt >= total || candidates.length >= this.config.search.maxResults) break;
+        if (issues.length === 0 || startAt >= total) break;
+        if (candidates.length >= this.config.search.maxResults) { complete = false; break; }
         if (page + 1 >= this.config.search.maxPages) complete = false;
       }
       const bounded = context(candidates, this.config.search.maxContextBytes);

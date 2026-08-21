@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { StorageUnitOfWork } from "../storage/repository.js";
 import type { DuplicateDecision, JiraSemanticAnswer } from "./types.js";
-import type { JiraConfirmation, JiraPreview } from "./confirmation.js";
+import type { JiraConfirmation, JiraConfirmationExpectation, JiraPreview } from "./confirmation.js";
 
 function identityHash(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }
 function parseObject(value: unknown): Record<string, unknown> | undefined {
@@ -17,7 +17,7 @@ export interface DurableConfirmationBinding {
   readonly draftId: string;
   readonly draftVersion: number;
   readonly metadataHash: string;
-  readonly payloadHash: string;
+  readonly confirmationHash: string;
 }
 
 export class JiraWorkflowPersistence {
@@ -44,15 +44,15 @@ export class JiraWorkflowPersistence {
     });
   }
   confirm(preview: JiraPreview, actorId: string, chatId: string): JiraConfirmation {
-    const value = Object.freeze({ id: this.newId(), actorId, chatId, draftId: preview.draftId, draftVersion: preview.draftVersion, metadataHash: preview.metadataHash, payloadHash: preview.payloadHash, confirmedAt: this.now() });
-    this.unitOfWork.criticalTransaction(({ sql }) => { sql.prepare(`INSERT INTO jira_confirmations(id,actor_hash,chat_hash,draft_id,draft_version,metadata_hash,payload_hash,confirmed_at,consumed_at) VALUES(?,?,?,?,?,?,?,?,NULL)`).run(value.id, identityHash(actorId), identityHash(chatId), value.draftId, value.draftVersion, value.metadataHash, value.payloadHash, value.confirmedAt); });
+    const value = Object.freeze({ id: this.newId(), draftId: preview.draftId, draftVersion: preview.draftVersion, metadataHash: preview.metadataHash, bindingHash: preview.bindingHash, confirmedAt: this.now() });
+    this.unitOfWork.criticalTransaction(({ sql }) => { sql.prepare(`INSERT INTO jira_confirmations(id,actor_hash,chat_hash,draft_id,draft_version,metadata_hash,payload_hash,confirmed_at,consumed_at) VALUES(?,?,?,?,?,?,?,?,NULL)`).run(value.id, identityHash(actorId), identityHash(chatId), value.draftId, value.draftVersion, value.metadataHash, value.bindingHash, value.confirmedAt); });
     return value;
   }
-  require(id: string, expected: Omit<JiraConfirmation, "id" | "confirmedAt">): DurableConfirmationBinding {
+  require(id: string, expected: JiraConfirmationExpectation): DurableConfirmationBinding {
     return this.unitOfWork.transaction(({ sql }) => {
       const row = sql.prepare(`SELECT id,actor_hash,chat_hash,draft_id,draft_version,metadata_hash,payload_hash FROM jira_confirmations WHERE id=?`).get(id) as Record<string, unknown> | undefined;
-      if (!row || row.actor_hash !== identityHash(expected.actorId) || row.chat_hash !== identityHash(expected.chatId) || row.draft_id !== expected.draftId || row.draft_version !== expected.draftVersion || row.metadata_hash !== expected.metadataHash || row.payload_hash !== expected.payloadHash) throw new Error("JIRA_CONFIRMATION_STALE");
-      return Object.freeze({ id, actorHash: String(row.actor_hash), chatHash: String(row.chat_hash), draftId: expected.draftId, draftVersion: expected.draftVersion, metadataHash: expected.metadataHash, payloadHash: expected.payloadHash });
+      if (!row || row.actor_hash !== identityHash(expected.actorId) || row.chat_hash !== identityHash(expected.chatId) || row.draft_id !== expected.draftId || row.draft_version !== expected.draftVersion || row.metadata_hash !== expected.metadataHash || row.payload_hash !== expected.bindingHash) throw new Error("JIRA_CONFIRMATION_STALE");
+      return Object.freeze({ id, actorHash: String(row.actor_hash), chatHash: String(row.chat_hash), draftId: expected.draftId, draftVersion: expected.draftVersion, metadataHash: expected.metadataHash, confirmationHash: expected.bindingHash });
     });
   }
 }

@@ -89,6 +89,10 @@ test("accepts deployment Jira scope and rejects an unsafe confirmation gate/tool
   const tools = validRawConfig();
   tools.allowedTools = ["idea_to_jira_validate_draft", "exec"];
   assert.deepEqual(load(tools), { ok: false, code: "TOOL_ALLOWLIST_INVALID" });
+
+  const numericFieldId = validRawConfig();
+  (((numericFieldId.jira as Record<string, unknown>).search as Record<string, unknown>).fields as string[]).push("customfield_12345");
+  assert.deepEqual(load(numericFieldId), { ok: false, code: "JIRA_SCOPE_INVALID" });
 });
 
 test("rejects invalid admin IDs and catalog checksum/content", () => {

@@ -86,7 +86,7 @@ const LIMIT_KEYS = ["inputTextChars", "requestsPerMinute", "burst", "activeDraft
 const RETENTION_KEYS = ["draftDays", "auditDays"] as const;
 const SAFE_SELECTOR = /^[A-Za-z][A-Za-z0-9 _.-]{0,127}$/;
 const SAFE_PROJECT_KEY = /^[A-Z][A-Z0-9_]{0,31}$/;
-const SAFE_FIELD = /^(?:key|[a-z][a-z0-9_.-]{0,127}|customfield_[1-9][0-9]{0,19})$/;
+const SAFE_FIELD = /^(?:key|[a-z][a-z0-9_.-]{0,127})$/;
 
 function object(value: unknown): JsonObject | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : undefined;
@@ -118,7 +118,7 @@ function parseHttpsOrigin(raw: unknown): string | undefined {
 function parseFields(value: unknown): readonly string[] | undefined {
   if (!Array.isArray(value) || value.length < 1 || value.length > 50) return undefined;
   const fields = value.map(string);
-  if (fields.some((field) => !field || !SAFE_FIELD.test(field)) || new Set(fields).size !== fields.length) return undefined;
+  if (fields.some((field) => !field || !SAFE_FIELD.test(field) || /^customfield_[1-9][0-9]*$/.test(field)) || new Set(fields).size !== fields.length) return undefined;
   return Object.freeze(fields as string[]);
 }
 

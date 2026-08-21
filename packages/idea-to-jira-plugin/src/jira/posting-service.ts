@@ -45,7 +45,7 @@ export class JiraPostingService {
       if (row.state !== "PENDING") return { owner: false, row };
       if (confirmation) {
         const consumed = sql.prepare("UPDATE jira_confirmations SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL AND actor_hash = ? AND chat_hash = ? AND draft_id = ? AND draft_version = ? AND metadata_hash = ? AND payload_hash = ?").run(
-          now, confirmation.id, confirmation.actorHash, confirmation.chatHash, confirmation.draftId, confirmation.draftVersion, confirmation.metadataHash, confirmation.payloadHash,
+          now, confirmation.id, confirmation.actorHash, confirmation.chatHash, confirmation.draftId, confirmation.draftVersion, confirmation.metadataHash, confirmation.confirmationHash,
         ).changes;
         if (Number(consumed) !== 1) throw new Error("JIRA_CONFIRMATION_STALE");
       }

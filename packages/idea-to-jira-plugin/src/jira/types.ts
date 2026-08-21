@@ -74,7 +74,8 @@ export interface DuplicateDecision {
 
 export type JiraQuestionKind = "text" | "number" | "date" | "datetime" | "single-choice" | "multi-choice";
 export interface JiraFieldQuestion {
-  readonly fieldId: string;
+  /** Opaque metadata-version-bound handle. Runtime Jira field IDs never enter model context. */
+  readonly questionId: string;
   readonly label: string;
   readonly kind: JiraQuestionKind;
   readonly required: true;

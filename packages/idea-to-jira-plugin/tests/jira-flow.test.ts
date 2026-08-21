@@ -70,6 +70,23 @@ test("search sends exact configured JQL/fields, strips extras, and bounds untrus
   assert.match(result.context, /UNTRUSTED_JIRA_CONTENT/); assert.equal(result.candidates[0]?.fields.secretExtra, undefined);
 });
 
+test("result cap is partial and repeated read failures open the bounded circuit", async () => {
+  const base = effectiveConfig().jira;
+  const cappedConfig = { ...base, credentialAvailable: true, search: { ...base.search, maxResults: 1, maxPages: 2 } };
+  const cappedHttp = new JiraHttpClient({ origin: cappedConfig.url, token: "fake", timeoutMs: 1_000, fetch: async () => json({ total: 2, issues: [{ key: "PROJECT-1", fields: { summary: "unrelated" } }] }) });
+  const capped = await new JiraSearchClient(cappedConfig, cappedHttp).search(draft(), snapshot());
+  assert.equal(capped.complete, false);
+  assert.equal(classifyDuplicates(draft(), capped).outcome, "UNCERTAIN");
+
+  let calls = 0; let clock = 10_000;
+  const failingHttp = new JiraHttpClient({ origin: cappedConfig.url, token: "fake", timeoutMs: 1_000, fetch: async () => { calls += 1; throw new Error("offline"); } });
+  const circuit = new JiraSearchClient(cappedConfig, failingHttp, () => clock);
+  await circuit.search(draft(), snapshot()); await circuit.search(draft(), snapshot()); await circuit.search(draft(), snapshot());
+  const opened = await circuit.search(draft(), snapshot());
+  assert.equal(calls, 3); assert.equal(opened.errorCode, "JIRA_CIRCUIT_OPEN");
+  clock += 30_001; await circuit.search(draft(), snapshot()); assert.equal(calls, 4);
+});
+
 test("partial search is UNCERTAIN while high-overlap candidates are DUPLICATE and bindings are versioned", () => {
   const binding = { draftId: "draft-one", draftVersion: 3, configHash: "b".repeat(64), metadataHash: "a".repeat(64) };
   const partial = classifyDuplicates(draft(), { complete: false, candidates: [], context: "", contextBytes: 0, binding, errorCode: "JIRA_TIMEOUT" });
@@ -90,10 +107,13 @@ test("search circuit breaker opens after repeated Jira failures and returns boun
 test("dynamic required fields preserve Jira defaults and resolve semantic answers only server-side", () => {
   const metadata = snapshot(); const form = buildCreateForm(metadata);
   assert.deepEqual(form.questions.map((item) => item.label), ["Due date", "Priority"]); assert.deepEqual(form.defaults, ["Team"]);
+  assert.doesNotMatch(JSON.stringify(form), /priorityRuntime|dueRuntime|runtime-option/);
+  assert.equal(form.questions.every((item) => /^[a-f0-9]{64}$/.test(item.questionId)), true);
   const payload = buildCanonicalPayload(draft(), metadata, { priorityRuntime: "High", dueRuntime: "2026-09-30" });
   assert.deepEqual(payload.fields.priorityRuntime, { id: "runtime-option-high" }); assert.equal(payload.fields.defaultRuntime, undefined);
   assert.equal(payload.fields.project && (payload.fields.project as { id: string }).id, "runtime-project");
   assert.throws(() => buildCanonicalPayload(draft(), metadata, { priorityRuntime: "Unknown", dueRuntime: "2026-09-30" }), /INVALID/);
+  assert.throws(() => buildCanonicalPayload(draft(), metadata, { priorityRuntime: "High", dueRuntime: "2026-02-30" }), /INVALID/);
   const blocked = snapshot({ fields: Object.freeze({ mystery: Object.freeze({ id: "mystery", name: "Mystery", required: true, schema: Object.freeze({ type: "user" }), hasDefaultValue: false, allowedValues: Object.freeze([]) }) }) });
   assert.deepEqual(buildCreateForm(blocked).blockers, ["UNSUPPORTED_REQUIRED_FIELD:Mystery"]);
 });
@@ -101,9 +121,12 @@ test("dynamic required fields preserve Jira defaults and resolve semantic answer
 test("preview confirmation is bound to actor/chat/draft/metadata/payload and rejects replay against changed data", () => {
   const metadata = snapshot(); const payload = buildCanonicalPayload(draft(), metadata, { priorityRuntime: "High", dueRuntime: "2026-09-30" });
   const preview = createJiraPreview(draft(), metadata, payload, 1_024); const store = new JiraConfirmationStore(() => "2026-08-21T02:00:00Z", () => "confirmation-one");
+  const changedDecision = createJiraPreview(draft(), metadata, payload, 1_024, "changed-duplicate-decision");
+  assert.notEqual(preview.bindingHash, changedDecision.bindingHash);
   const confirmation = store.confirm(preview, "actor", "chat");
-  assert.equal(store.require(confirmation.id, { actorId: "actor", chatId: "chat", draftId: draft().id, draftVersion: 3, metadataHash: metadata.hash, payloadHash: payload.hash }).id, confirmation.id);
-  assert.throws(() => store.require(confirmation.id, { actorId: "other", chatId: "chat", draftId: draft().id, draftVersion: 3, metadataHash: metadata.hash, payloadHash: payload.hash }), /STALE/);
+  assert.doesNotMatch(JSON.stringify(confirmation), /actor|chat/);
+  assert.equal(store.require(confirmation.id, { actorId: "actor", chatId: "chat", draftId: draft().id, draftVersion: 3, metadataHash: metadata.hash, bindingHash: preview.bindingHash }).id, confirmation.id);
+  assert.throws(() => store.require(confirmation.id, { actorId: "other", chatId: "chat", draftId: draft().id, draftVersion: 3, metadataHash: metadata.hash, bindingHash: preview.bindingHash }), /STALE/);
 });
 
 function postingDatabase() {
@@ -122,9 +145,9 @@ test("decisions, answers, and confirmation consumption survive workflow restart 
     const restarted = new JiraWorkflowPersistence(db.unit);
     assert.equal(restarted.loadDecision("draft-one", 3, "1".repeat(64), "a".repeat(64))?.outcome, "UNIQUE");
     assert.equal(restarted.loadAnswers("draft-one", 3, "a".repeat(64)).priorityRuntime, "High");
-    const preview = Object.freeze({ draftId: "draft-one", draftVersion: 3, metadataHash: "a".repeat(64), payloadHash: "d".repeat(64), text: "bounded" });
+    const preview = Object.freeze({ draftId: "draft-one", draftVersion: 3, metadataHash: "a".repeat(64), payloadHash: "d".repeat(64), bindingHash: "e".repeat(64), text: "bounded" });
     const confirmation = persistence.confirm(preview, "actor", "chat");
-    const binding = restarted.require(confirmation.id, { actorId: "actor", chatId: "chat", draftId: "draft-one", draftVersion: 3, metadataHash: "a".repeat(64), payloadHash: "d".repeat(64) });
+    const binding = restarted.require(confirmation.id, { actorId: "actor", chatId: "chat", draftId: "draft-one", draftVersion: 3, metadataHash: "a".repeat(64), bindingHash: "e".repeat(64) });
     const config = { ...effectiveConfig().jira, credentialAvailable: true };
     const http = new JiraHttpClient({ origin: config.url, token: "fake", timeoutMs: 1_000, fetch: async () => { calls += 1; return json({ id: "9001", key: "PROJECT-77" }, 201); } });
     const posting = new JiraPostingService(db.unit, config, http, { now: () => "2026-08-21T02:00:00Z", newId: () => "operation-one" });
@@ -173,4 +196,9 @@ test("HTTP boundary rejects redirects, oversized/malformed responses and classif
   await assert.rejects(oversized.read("/rest/api/2/project/PROJECT"), /JIRA_RESPONSE_TOO_LARGE/);
   const malformed = new JiraHttpClient({ origin: "https://jira.example.test", token: "secret", timeoutMs: 500, fetch: async () => new Response("not json") });
   await assert.rejects(malformed.read("/rest/api/2/project/PROJECT"), /JIRA_MALFORMED/);
+  let authorization: string | null = null;
+  const authenticated = new JiraHttpClient({ origin: "https://jira.example.test", token: "runtime-secret", timeoutMs: 500, fetch: async (_input, init) => {
+    authorization = new Headers(init?.headers).get("authorization"); return json({});
+  } });
+  await authenticated.read("/rest/api/2/project/PROJECT"); assert.equal(authorization, "Bearer runtime-secret");
 });

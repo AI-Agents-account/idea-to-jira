@@ -9,7 +9,8 @@ import {
   requireRateLimit,
 } from "./runtime/policy.js";
 import { CONVERSATION_ROLE_REPLIES } from "./runtime/conversation-role-gate.js";
-import { requesterFromAgentRun, requesterFromToolContext } from "./runtime/requester-context.js";
+import { requesterFromAgentRun, requesterFromToolContext, type TrustedRequesterContext } from "./runtime/requester-context.js";
+import { JiraFailure } from "./jira/types.js";
 import {
   beginServiceRuntime,
   createServiceRuntimeCandidate,
@@ -119,7 +120,7 @@ const requestAccessParameters = Type.Object({}, { additionalProperties: false })
 const jiraDraftParameters = Type.Object({ draftId: text(128) }, { additionalProperties: false });
 const jiraAnswerParameters = Type.Object({
   draftId: text(128),
-  fieldId: text(128),
+  questionId: text(128),
   value: Type.Union([text(10_000), Type.Number(), Type.Array(text(512), { minItems: 1, maxItems: 50, uniqueItems: true })]),
 }, { additionalProperties: false });
 const jiraPreviewParameters = Type.Object({
@@ -139,6 +140,20 @@ const jiraCreateParameters = Type.Object({
 function runtimeBuildFingerprint(): string | null {
   const value = process.env.IDEA_TO_JIRA_BUILD_FINGERPRINT?.trim();
   return value && /^[a-f0-9]{64}$/.test(value) ? value : null;
+}
+
+function isActiveCreator(runtime: RuntimeServices, requester: TrustedRequesterContext): boolean {
+  const decision = runtime.accessService.authorizeConversation(requester);
+  return decision.allowed && decision.via === "ACTIVE_CREATOR";
+}
+
+function mappedToolError(error: unknown): "JIRA_AUTH_FAILED" | "JIRA_RATE_LIMITED" | "JIRA_SCOPE_INVALID" | "JIRA_UNAVAILABLE" | "JIRA_REQUEST_FAILED" | undefined {
+  if (!(error instanceof JiraFailure)) return undefined;
+  if (error.code === "JIRA_UNAUTHORIZED" || error.code === "JIRA_FORBIDDEN") return "JIRA_AUTH_FAILED";
+  if (error.code === "JIRA_RATE_LIMITED") return "JIRA_RATE_LIMITED";
+  if (error.code === "JIRA_SCOPE_NOT_FOUND") return "JIRA_SCOPE_INVALID";
+  if (["JIRA_DISABLED", "JIRA_CREDENTIAL_MISSING", "JIRA_TIMEOUT", "JIRA_SERVER_ERROR", "JIRA_NETWORK_ERROR", "JIRA_CIRCUIT_OPEN"].includes(error.code)) return "JIRA_UNAVAILABLE";
+  return "JIRA_REQUEST_FAILED";
 }
 
 function persistAudit(
@@ -448,7 +463,9 @@ const plugin = {
         };
       } catch (error) {
         if (error instanceof DraftVersionConflict || error instanceof SafeError) throw error;
-        const code = error instanceof Error && isSafeErrorCode(error.message) ? error.message : "DRAFT_INVALID";
+        const mapped = mappedToolError(error);
+        const message = error instanceof Error ? error.message : "";
+        const code = mapped ?? (isSafeErrorCode(message) ? message : message === "JIRA_ANSWER_FIELD_NOT_ALLOWED" ? "JIRA_REQUIRED_ANSWER_INVALID" : "DRAFT_INVALID");
         throw new SafeError(code, code === "RATE_LIMITED", { cause: error });
       }
     }
@@ -517,7 +534,7 @@ const plugin = {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !activeRuntime.accessService.authorizeConversation(requester.context).allowed) return null;
+      if (!requester.ok || !isActiveCreator(activeRuntime, requester.context)) return null;
       return {
         name: "idea_to_jira_search_duplicates",
         label: "Search configured Jira scope",
@@ -526,6 +543,7 @@ const plugin = {
         execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
           const draft = runtime.draftService.readDraft(currentRequester.context, (input as { draftId: string }).draftId).draft;
           if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
           return runtime.jiraWorkflow.searchDuplicates(draft);
         }),
       };
@@ -535,17 +553,18 @@ const plugin = {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !activeRuntime.accessService.authorizeConversation(requester.context).allowed) return null;
+      if (!requester.ok || !isActiveCreator(activeRuntime, requester.context)) return null;
       return {
         name: "idea_to_jira_answer_field",
         label: "Answer a discovered Jira field",
         description: "Store a semantic answer for one current metadata-derived typed question; arbitrary Jira JSON is impossible.",
         parameters: jiraAnswerParameters,
         execute: async (_id: string, input: unknown) => executeTool(toolContext, input, async (runtime, currentRequester) => {
-          const answer = input as { draftId: string; fieldId: string; value: string | number | readonly string[] };
+          const answer = input as { draftId: string; questionId: string; value: string | number | readonly string[] };
           const draft = runtime.draftService.readDraft(currentRequester.context, answer.draftId).draft;
           if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
-          return runtime.jiraWorkflow.answerField(draft, answer.fieldId, answer.value);
+          if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          return runtime.jiraWorkflow.answerField(draft, answer.questionId, answer.value);
         }),
       };
     }, { name: "idea_to_jira_answer_field" });
@@ -554,7 +573,7 @@ const plugin = {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !activeRuntime.accessService.authorizeConversation(requester.context).allowed) return null;
+      if (!requester.ok || !isActiveCreator(activeRuntime, requester.context)) return null;
       return {
         name: "idea_to_jira_preview_issue",
         label: "Preview exact Jira issue",
@@ -564,6 +583,7 @@ const plugin = {
           const value = input as { draftId: string; explicitProceed?: boolean };
           const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
           if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
           return runtime.jiraWorkflow.preview(draft, value.explicitProceed === true);
         }),
       };
@@ -573,7 +593,7 @@ const plugin = {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !activeRuntime.accessService.authorizeConversation(requester.context).allowed) return null;
+      if (!requester.ok || !isActiveCreator(activeRuntime, requester.context)) return null;
       return {
         name: "idea_to_jira_confirm_issue",
         label: "Confirm exact Jira preview",
@@ -583,8 +603,8 @@ const plugin = {
           const value = input as { draftId: string; explicitProceed?: boolean };
           const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
           if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
-          const prepared = await runtime.jiraWorkflow.preview(draft, value.explicitProceed === true);
-          return runtime.jiraWorkflow.confirm(prepared, currentRequester.context.senderId, currentRequester.context.chatId);
+          if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          return runtime.jiraWorkflow.confirm(draft, currentRequester.context.senderId, currentRequester.context.chatId, value.explicitProceed === true);
         }),
       };
     }, { name: "idea_to_jira_confirm_issue" });
@@ -593,7 +613,7 @@ const plugin = {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !activeRuntime.accessService.authorizeConversation(requester.context).allowed) return null;
+      if (!requester.ok || !isActiveCreator(activeRuntime, requester.context)) return null;
       return {
         name: "idea_to_jira_create_issue",
         label: "Create confirmed Jira issue",
@@ -603,6 +623,7 @@ const plugin = {
           const value = input as { draftId: string; confirmationId: string; explicitProceed?: boolean };
           const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
           if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
           return runtime.jiraWorkflow.create(draft, currentRequester.context.senderId, currentRequester.context.chatId, value.confirmationId, value.explicitProceed === true);
         }),
       };

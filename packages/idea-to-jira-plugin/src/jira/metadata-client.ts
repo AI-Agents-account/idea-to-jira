@@ -6,6 +6,9 @@ import { buildCreateForm } from "./dynamic-fields.js";
 import { JiraFailure, type JiraAllowedValue, type JiraFieldMetadata, type JiraMetadataSnapshot } from "./types.js";
 
 type Json = Record<string, unknown>;
+const MAX_METADATA_FIELDS = 256;
+const MAX_ALLOWED_VALUES_PER_FIELD = 200;
+const MAX_ALLOWED_VALUES_TOTAL = 1_000;
 function record(value: unknown): Json | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Json : undefined; }
 function text(value: unknown, maximum = 512): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -26,6 +29,7 @@ function field(id: string, value: unknown): JiraFieldMetadata | undefined {
   const item = record(value); const name = text(item?.name); const schema = record(item?.schema);
   const type = text(schema?.type);
   if (!name || !type || !/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(id)) return undefined;
+  if (Array.isArray(item?.allowedValues) && item.allowedValues.length > MAX_ALLOWED_VALUES_PER_FIELD) return undefined;
   const allowed = Array.isArray(item?.allowedValues) ? item.allowedValues.map(option).filter((entry): entry is JiraAllowedValue => Boolean(entry)) : [];
   const items = text(schema?.items); const system = text(schema?.system); const custom = text(schema?.custom);
   return Object.freeze({
@@ -73,7 +77,16 @@ export class JiraMetadataClient {
     const selectedType = issueTypes.map(record).find((candidate) => text(candidate?.name) === this.options.config.issueTypeName);
     const issueTypeId = runtimeId(selectedType?.id); const issueTypeName = text(selectedType?.name); const rawFields = record(selectedType?.fields);
     if (!issueTypeId || issueTypeName !== this.options.config.issueTypeName || !rawFields) throw new JiraFailure("JIRA_SCOPE_NOT_FOUND");
-    const fields = Object.freeze(Object.fromEntries(Object.entries(rawFields).map(([id, value]) => [id, field(id, value)]).filter((entry): entry is [string, JiraFieldMetadata] => Boolean(entry[1]))));
+    const rawFieldEntries = Object.entries(rawFields);
+    if (rawFieldEntries.length > MAX_METADATA_FIELDS) throw new JiraFailure("JIRA_RESPONSE_TOO_LARGE");
+    const parsedFields: Array<[string, JiraFieldMetadata]> = [];
+    for (const [id, value] of rawFieldEntries) {
+      const parsed = field(id, value);
+      if (parsed) parsedFields.push([id, parsed]);
+      else if (record(value)?.required === true) throw new JiraFailure("JIRA_MALFORMED");
+    }
+    if (parsedFields.reduce((total, [, value]) => total + value.allowedValues.length, 0) > MAX_ALLOWED_VALUES_TOTAL) throw new JiraFailure("JIRA_RESPONSE_TOO_LARGE");
+    const fields = Object.freeze(Object.fromEntries(parsedFields));
 
     const permissionPath = "/rest/api/2/mypermissions?" + new URLSearchParams({ projectKey: this.options.config.projectKey, permissions: "BROWSE_PROJECTS,CREATE_ISSUES" });
     const permissionResponse = await this.options.http.read<unknown>(permissionPath); const permissions = record(record(permissionResponse.value)?.permissions);
@@ -82,7 +95,7 @@ export class JiraMetadataClient {
       jql: this.options.config.search.jql, fields: this.options.config.search.fields, startAt: 0, maxResults: 1,
     }));
     const preflightBody = record(preflight.value);
-    if (!Array.isArray(preflightBody?.issues) || typeof preflightBody.total !== "number") throw new JiraFailure("JIRA_MALFORMED");
+    if (!Array.isArray(preflightBody?.issues) || typeof preflightBody.total !== "number" || !Number.isSafeInteger(preflightBody.total) || preflightBody.total < 0) throw new JiraFailure("JIRA_MALFORMED");
     const provisional = { project: { id: projectId, key: projectKey, name: projectName }, issueType: { id: issueTypeId, name: issueTypeName }, fields, permissions: { browse, create } };
     const form = buildCreateForm({ ...provisional, fetchedAt: "", hash: "", readiness: "JIRA_SEARCH_READY", blockers: [] });
     const blockers = [...form.blockers, ...(!browse ? ["BROWSE_PERMISSION_MISSING"] : []), ...(!create ? ["CREATE_PERMISSION_MISSING"] : [])];

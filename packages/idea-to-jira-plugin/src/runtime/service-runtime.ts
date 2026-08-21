@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { AccessService } from "../access/access-service.js";
@@ -84,8 +84,13 @@ const defaultFactories: RuntimeServiceFactories = Object.freeze({
   createJiraWorkflow: (storage: PluginDatabase, config: EffectiveConfig) => {
     let token = process.env.JIRA_TOKEN?.trim();
     if (!token && process.env.JIRA_TOKEN_FILE?.trim()) {
-      try { token = readFileSync(process.env.JIRA_TOKEN_FILE.trim(), "utf8").trim(); } catch { token = undefined; }
+      try {
+        const tokenPath = process.env.JIRA_TOKEN_FILE.trim();
+        const tokenStat = statSync(tokenPath);
+        token = tokenStat.isFile() && (tokenStat.mode & 0o077) === 0 ? readFileSync(tokenPath, "utf8").trim() : undefined;
+      } catch { token = undefined; }
     }
+    if (!token || token.length > 8_192 || /[\u0000-\u0020\u007f]/.test(token)) token = undefined;
     if (!config.jira.enabled || !config.jira.credentialAvailable || !token) return undefined;
     const http = new JiraHttpClient({
       origin: config.jira.url,
