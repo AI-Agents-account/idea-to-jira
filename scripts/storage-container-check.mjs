@@ -32,7 +32,7 @@ const row = storage.repositories.transaction(({ sql }) =>
   sql.prepare("SELECT telegram_sender_id FROM users WHERE id = ?").get("container-check-user"),
 );
 if (row?.telegram_sender_id !== "123456789") throw new Error("STORAGE_RESTART_CHECK_FAILED");
-if (storage.health.schemaVersion !== 3) throw new Error("STORAGE_SCHEMA_CHECK_FAILED");
+if (storage.health.schemaVersion !== 4) throw new Error("STORAGE_SCHEMA_CHECK_FAILED");
 if (mode(stateDir) !== expectedDirectoryMode || mode(databasePath) !== expectedFileMode) {
   throw new Error("STORAGE_MODE_CHECK_FAILED");
 }
