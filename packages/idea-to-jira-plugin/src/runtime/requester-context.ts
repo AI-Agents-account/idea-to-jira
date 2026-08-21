@@ -1,4 +1,4 @@
-import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
+import type { OpenClawPluginToolContext, PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginHookAgentContext, PluginHookBeforeAgentRunEvent } from "openclaw/plugin-sdk/types";
 
 import type { EffectiveConfig } from "../config.js";
@@ -85,6 +85,33 @@ export function requesterFromToolContext(
       senderId: context.requesterSenderId,
       chatId: context.deliveryContext?.to,
       threadId: context.deliveryContext?.threadId,
+    },
+    config,
+  );
+}
+
+/** Uses only host-populated command context. Command arguments are never identity input. */
+export function requesterFromCommandContext(
+  context: PluginCommandContext,
+  config: EffectiveConfig,
+): RequesterContextResult {
+  const senderId = normalized(context.senderId);
+  if (!numericTelegramId(senderId)) return { ok: false, code: "SENDER_MISSING" };
+  // Telegram native commands expose channel-qualified From/To targets while senderId
+  // remains the plain provider identity. Both targets must bind to the same DM peer.
+  const expectedTarget = `${config.telegram.channelId}:${senderId}`;
+  if (context.from !== expectedTarget || context.to !== expectedTarget) {
+    return { ok: false, code: "DESTINATION_DENIED" };
+  }
+  return validateRequesterFacts(
+    {
+      agentId: context.agentId,
+      trigger: "user",
+      channelId: context.channelId ?? context.channel,
+      accountId: context.accountId,
+      senderId,
+      chatId: senderId,
+      threadId: context.messageThreadId ?? context.threadParentId,
     },
     config,
   );

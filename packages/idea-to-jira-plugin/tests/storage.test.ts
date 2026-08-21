@@ -78,12 +78,12 @@ function assertRuntimeOwner(path: string): void {
   assert.equal(statSync(path).gid, process.getgid());
 }
 
-test("fresh storage schema v2 is deterministic and fixes canonical persistent enums", () => {
+test("fresh storage schema v3 is deterministic and fixes canonical persistent enums", () => {
   const stateDir = stateDirectory("fresh");
   const storage = openPluginDatabase({ stateDir });
   assert.deepEqual(storage.health, {
     healthy: true,
-    schemaVersion: 2,
+    schemaVersion: 3,
     quickCheck: "ok",
     foreignKeyViolations: 0,
   });
@@ -139,10 +139,18 @@ test("FK, CHECK and unique constraints enforce access, draft and claim invariant
     sql.prepare("INSERT INTO drafts(id, owner_user_id) VALUES (?, ?)").run("orphan", "missing");
   }), /foreign key/i);
   withSql(storage, (sql) => {
-    sql.prepare("INSERT INTO access_requests(id, user_id) VALUES (?, ?)").run("request-1", "user-1");
+    sql.prepare("INSERT INTO access_requests(id, user_id, action_ref) VALUES (?, ?, ?)").run(
+      "request-1",
+      "user-1",
+      "request_action_ref_000001",
+    );
   });
   assert.throws(() => withSql(storage, (sql) => {
-    sql.prepare("INSERT INTO access_requests(id, user_id) VALUES (?, ?)").run("request-2", "user-1");
+    sql.prepare("INSERT INTO access_requests(id, user_id, action_ref) VALUES (?, ?, ?)").run(
+      "request-2",
+      "user-1",
+      "request_action_ref_000002",
+    );
   }), /unique/i);
 
   insertPendingOperation(storage, "operation-1", "draft-1", "idem-1");
@@ -278,12 +286,30 @@ test("migration runner upgrades v0, is repeat-safe and rejects changed history",
   const path = join(stateDirectory("upgrade"), "upgrade.sqlite3");
   const database = new DatabaseSync(path);
   assert.equal(runMigrations(database, []), 0);
-  assert.equal(runMigrations(database, migrations), 2);
-  assert.equal(runMigrations(database, migrations), 2);
+  assert.equal(runMigrations(database, migrations), 3);
+  assert.equal(runMigrations(database, migrations), 3);
   database.prepare("UPDATE schema_migrations SET checksum = ? WHERE version = 1").run(HASH_B);
   assert.throws(
     () => runMigrations(database, migrations),
     (error) => error instanceof MigrationError && error.code === "MIGRATION_HISTORY_MISMATCH",
+  );
+  database.close();
+});
+
+test("v2 RBAC upgrade backfills opaque action references and rejects later removal", () => {
+  const database = new DatabaseSync(join(stateDirectory("rbac-upgrade"), "rbac-upgrade.sqlite3"));
+  runMigrations(database, migrations.slice(0, 2));
+  database.prepare("INSERT INTO users(id, telegram_sender_id) VALUES (?, ?)").run("user-1", "123456789");
+  database.prepare("INSERT INTO access_requests(id, user_id) VALUES (?, ?)").run("request-1", "user-1");
+
+  assert.equal(runMigrations(database, migrations), 3);
+  const row = database.prepare("SELECT action_ref FROM access_requests WHERE id = ?").get("request-1") as {
+    action_ref: string;
+  };
+  assert.match(row.action_ref, /^[a-f0-9]{48}$/);
+  assert.throws(
+    () => database.prepare("UPDATE access_requests SET action_ref = NULL WHERE id = ?").run("request-1"),
+    /ACCESS_REQUEST_ACTION_REF_REQUIRED/,
   );
   database.close();
 });
@@ -327,8 +353,8 @@ test("an untracked application table is rejected without adopting or mutating it
 test("future and partially recorded schema versions fail closed", () => {
   const future = new DatabaseSync(join(stateDirectory("future"), "future.sqlite3"));
   runMigrations(future, migrations);
-  future.prepare("INSERT INTO schema_migrations(version, name, checksum) VALUES (3, ?, ?)").run("future", HASH_B);
-  future.exec("PRAGMA user_version = 3");
+  future.prepare("INSERT INTO schema_migrations(version, name, checksum) VALUES (4, ?, ?)").run("future", HASH_B);
+  future.exec("PRAGMA user_version = 4");
   assert.throws(
     () => runMigrations(future, migrations),
     (error) => error instanceof MigrationError && error.code === "MIGRATION_FUTURE_SCHEMA",
@@ -354,14 +380,14 @@ test("non-empty schema upgrade requires and verifies a consistent pre-upgrade ba
   await storage.createConsistentBackup(backupPath);
   storage.close();
 
-  const thirdMigration = defineMigration(3, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;");
-  const registry = [...migrations, thirdMigration];
+  const fourthMigration = defineMigration(4, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;");
+  const registry = [...migrations, fourthMigration];
   assert.throws(
     () => openPluginDatabase({ stateDir, migrationRegistry: registry }),
     /STORAGE_UPGRADE_BACKUP_REQUIRED/,
   );
   const upgraded = openPluginDatabase({ stateDir, migrationRegistry: registry, upgradeBackupPath: backupPath });
-  assert.equal(upgraded.health.schemaVersion, 3);
+  assert.equal(upgraded.health.schemaVersion, 4);
   const marker = withSql(upgraded, (sql) => sql.prepare(
     "SELECT count(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'upgrade_marker'",
   ).get()) as { count: number };
@@ -381,7 +407,7 @@ test("tampered pre-upgrade backup is rejected by the production startup path", a
   tampered.close();
   const registry = [
     ...migrations,
-    defineMigration(3, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;"),
+    defineMigration(4, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;"),
   ];
   assert.throws(
     () => openPluginDatabase({ stateDir, migrationRegistry: registry, upgradeBackupPath: backupPath }),

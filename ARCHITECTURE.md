@@ -12,7 +12,7 @@ Idea-to-Jira — выделенный Telegram-ассистент, которы�
 
 Система строится как один выделенный OpenClaw Gateway с одним агентом и mixed plugin `idea-to-jira`. Отдельный прикладной backend не предполагается: детерминированная бизнес-логика, RBAC, состояние Draft, интеграция с Jira и аудит принадлежат плагину, а OpenClaw ведёт диалог, вызывает только разрешённые typed tools и управляет model/channel runtime.
 
-> Текущий репозиторий — production-oriented scaffold, а не готовый MVP. Реализованы stage-01 runtime/config/security foundation, typed validation Draft и fail-closed Jira adapter; RBAC, SQLite, поиск дублей, Jira POST, reconciliation и уведомления пока описаны как целевой контракт.
+> Текущий репозиторий — production-oriented scaffold, а не готовый MVP. Реализованы stage-01 runtime/config/security foundation, typed validation Draft, stage-02 SQLite, stage-03 audit/redaction и stage-04 RBAC/access requests; поиск дублей, Jira POST, reconciliation и product notifications пока описаны как целевой контракт.
 
 ## 2. Архитектурные принципы
 
@@ -32,7 +32,7 @@ Idea-to-Jira — выделенный Telegram-ассистент, которы�
 | OpenClaw plugin | Единая startup config validation, `before_agent_run` и tool-context gates, один typed tool | Полный набор узких server-side tools и lifecycle hooks |
 | Draft | Нормализация и валидация полей `Feature` в памяти | Версионированный Draft, CAS, диалог, readiness и retention в SQLite |
 | Jira | Fail-closed adapter: write всегда запрещён | Bounded duplicate search, whitelist mapper, POST и manual reconciliation |
-| Доступ | Channel/account/agent/user-trigger/DM/destination fail-closed gate; RBAC ещё не реализован | Guest/Creator/Business Admin с атомарными grant/revoke |
+| Доступ | Channel/account/agent/user-trigger/DM/destination fail-closed gate; Guest/Creator/Business Admin lifecycle, CAS/anti-replay и атомарные grant/revoke/suspend/restore/block | Stage-05+ повторно использует own-Draft/active-Creator guards перед disclosure/claim/POST |
 | Knowledge Catalog | Неполная Markdown-заготовка | Версионированный, проверяемый и fail-closed каталог маршрутизации |
 | Voice | Не реализован | Локальный Whisper `medium`, показ и коррекция транскрипта |
 | Уведомления | Не реализованы | Идемпотентная доставка автору, Business Admin и Product Owner |
@@ -558,7 +558,7 @@ idea-to-jira/
 └── compose.yaml                    # Gateway/CLI, volumes и hardening
 ```
 
-По мере реализации новые сервисы плагина должны оставаться узкими и тестируемыми: RBAC, Draft repository/state machine, Catalog loader, duplicate search, Jira mapper/client, operation repository, reconciliation и notifications. Критичные мутации обязаны проходить через `AuditedCriticalOperation`, чтобы state transition и audit insert были одной DB transaction. Их нельзя заменять одной универсальной «выполнить действие» функцией с model-defined payload.
+По мере реализации новые сервисы плагина должны оставаться узкими и тестируемыми: реализованный `AccessService`, Draft repository/state machine, Catalog loader, duplicate search, Jira mapper/client, operation repository, reconciliation и notifications. Критичные мутации обязаны проходить через `AuditedCriticalOperation`, чтобы state transition и audit insert были одной DB transaction. Их нельзя заменять одной универсальной «выполнить действие» функцией с model-defined payload.
 
 ## 14. Архитектурные инварианты приёмки
 

@@ -1,10 +1,12 @@
 import { initialSchemaMigration } from "./001-initial-schema.js";
 import { auditObservabilityBaselineMigration } from "./002-audit-observability-baseline.js";
+import { rbacAccessRequestsMigration } from "./003-rbac-access-requests.js";
 import type { Migration } from "./types.js";
 
 export const migrations: readonly Migration[] = Object.freeze([
   initialSchemaMigration,
   auditObservabilityBaselineMigration,
+  rbacAccessRequestsMigration,
 ]);
 export const LATEST_SCHEMA_VERSION = migrations.at(-1)?.version ?? 0;
 
