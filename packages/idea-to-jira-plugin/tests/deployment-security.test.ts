@@ -53,7 +53,7 @@ test("target-container storage verification is wired into the image and CI", asy
   assert.match(workflow, /storage-container-check\.mjs/);
   assert.doesNotMatch(workflow, /compose[^\n]*run[^\n]*--no-deps/);
   assert.match(storageCheck, /openPluginDatabase/);
-  assert.match(storageCheck, /schema=2 journal=wal modes=private restart=ok/);
+  assert.match(storageCheck, /schema=3 journal=wal modes=private restart=ok/);
 });
 
 test("health and create-readiness are separate signals", async () => {
