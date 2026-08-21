@@ -2,7 +2,7 @@
 
 **Статус:** целевая архитектура MVP и границы текущего scaffold
 
-**Дата:** 2026-08-20
+**Дата:** 2026-08-21
 
 **Целевой контур:** выделенный OpenClaw в Docker, Telegram, Jira Server 11.3.8
 
@@ -12,7 +12,7 @@ Idea-to-Jira — выделенный Telegram-ассистент, которы�
 
 Система строится как один выделенный OpenClaw Gateway с одним агентом и mixed plugin `idea-to-jira`. Отдельный прикладной backend не предполагается: детерминированная бизнес-логика, RBAC, состояние Draft, интеграция с Jira и аудит принадлежат плагину, а OpenClaw ведёт диалог, вызывает только разрешённые typed tools и управляет model/channel runtime.
 
-> Текущий репозиторий — production-oriented scaffold, а не готовый MVP. Реализованы stage-01 runtime/config/security foundation, typed validation Draft, stage-02 SQLite, stage-03 audit/redaction и stage-04 RBAC/access requests; поиск дублей, Jira POST, reconciliation и product notifications пока описаны как целевой контракт.
+> Текущий репозиторий — production-oriented scaffold, а не готовый MVP. Реализованы stage-01 runtime/config/security, stage-02 SQLite, stage-03 audit/redaction, stage-04 RBAC и stage-05 versioned Draft/readiness foundation. Live Catalog/metadata/duplicate integrations, Jira POST, reconciliation и product notifications остаются следующими этапами.
 
 ## 2. Архитектурные принципы
 
@@ -29,10 +29,10 @@ Idea-to-Jira — выделенный Telegram-ассистент, которы�
 
 | Область | Реализовано в scaffold | Целевой MVP |
 | --- | --- | --- |
-| OpenClaw plugin | Единая startup config validation, `before_agent_run` и tool-context gates, один typed tool | Полный набор узких server-side tools и lifecycle hooks |
-| Draft | Нормализация и валидация полей `Feature` в памяти | Версионированный Draft, CAS, диалог, readiness и retention в SQLite |
+| OpenClaw plugin | Startup config validation, `before_agent_run`/tool-context gates и пять узких Draft/access tools | Дополнительные узкие Catalog/duplicate/posting lifecycle surfaces |
+| Draft | Schema v1, per-field provenance, immutable versions, CAS, owner isolation, active limit, JC-004 formatter и pure readiness в SQLite | Диалоговая orchestration, live proof integrations и retention execution |
 | Jira | Fail-closed adapter: write всегда запрещён | Bounded duplicate search, whitelist mapper, POST и manual reconciliation |
-| Доступ | Channel/account/agent/user-trigger/DM/destination fail-closed gate; Guest/Creator/Business Admin lifecycle, CAS/anti-replay и атомарные grant/revoke/suspend/restore/block | Stage-05+ повторно использует own-Draft/active-Creator guards перед disclosure/claim/POST |
+| Доступ | Channel/account/agent/user-trigger/DM/destination fail-closed gate; Guest/Creator/Business Admin lifecycle, CAS/anti-replay; own-Draft predicate используется каждым Draft tool | Active-Creator guard перед duplicate disclosure/claim/POST |
 | Knowledge Catalog | Неполная Markdown-заготовка | Версионированный, проверяемый и fail-closed каталог маршрутизации |
 | Voice | Не реализован | Локальный Whisper `medium`, показ и коррекция транскрипта |
 | Уведомления | Не реализованы | Идемпотентная доставка автору, Business Admin и Product Owner |
@@ -393,7 +393,7 @@ stateDiagram-v2
     FAILED_FINAL --> EDITING: explicit corrected new-version path
 ```
 
-`EDITING` — каноническое persistent состояние schema v1. Voice transcript review и duplicate-check execution являются отдельными records/substates профильных компонентов, а не альтернативными состояниями Draft. `READY` — вычисляемое и перепроверяемое состояние, а не доверенная команда модели. Любое изменение Draft создаёт новую версию и инвалидирует результаты, привязанные к прежней версии. Завершённая или `UNKNOWN` operation сохраняется и продолжает блокировать повтор своего payload.
+`EDITING` — каноническое persistent состояние schema v1. Voice transcript review и duplicate-check execution являются отдельными records/substates профильных компонентов, а не альтернативными состояниями Draft. `READY` — вычисляемое и перепроверяемое состояние, а не доверенная команда модели. Значимое изменение payload/route/fingerprint создаёт новую версию и инвалидирует зависимые результаты; точный no-op не создаёт версию, а evidence-reference-only версия сохраняет результаты. Завершённая или `UNKNOWN` operation сохраняется и продолжает блокировать повтор своего payload. Фактический Stage-05 контракт описан в [`docs/DRAFT_VERSIONING.md`](docs/DRAFT_VERSIONING.md).
 
 ### 8.3. Posting operation
 

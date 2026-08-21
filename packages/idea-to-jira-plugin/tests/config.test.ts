@@ -22,7 +22,14 @@ test("builds one immutable effective configuration from config and protected env
   if (!result.ok) return;
   assert.equal(result.config.jira.projectId, "18100");
   assert.equal(result.config.jira.issueTypeId, "11500");
-  assert.deepEqual(result.config.allowedTools, ["idea_to_jira_validate_draft"]);
+  assert.deepEqual(result.config.allowedTools, [
+    "idea_to_jira_create_draft",
+    "idea_to_jira_read_draft",
+    "idea_to_jira_patch_draft",
+    "idea_to_jira_cancel_draft",
+    "idea_to_jira_request_access",
+  ]);
+  assert.equal(result.config.limits.activeDrafts, 3);
   assert.deepEqual(result.config.telegram.adminSenderIds, ["123456789", "987654321"]);
   assert.deepEqual(result.config.notifications.productOwnerSenderIds, ["111222333"]);
   assert.equal(Object.isFrozen(result.config), true);

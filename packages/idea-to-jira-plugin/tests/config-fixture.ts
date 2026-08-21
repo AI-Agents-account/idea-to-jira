@@ -31,8 +31,14 @@ export function validRawConfig(): Record<string, unknown> {
       sha256: catalogSha256,
     },
     sttModel: "medium",
-    allowedTools: ["idea_to_jira_validate_draft"],
-    limits: { inputTextChars: 20_000, requestsPerMinute: 20, burst: 5 },
+    allowedTools: [
+      "idea_to_jira_create_draft",
+      "idea_to_jira_read_draft",
+      "idea_to_jira_patch_draft",
+      "idea_to_jira_cancel_draft",
+      "idea_to_jira_request_access",
+    ],
+    limits: { inputTextChars: 20_000, requestsPerMinute: 20, burst: 5, activeDrafts: 3 },
     retention: { draftDays: 90, auditDays: 365 },
     stateDir: "/plugin-state/idea-to-jira",
   };

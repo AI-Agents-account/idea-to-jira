@@ -1,4 +1,4 @@
-import type { JiraIssueDraft } from "../domain/idea.js";
+import type { VersionedDraft } from "../domain/draft.js";
 
 export interface JiraCreateResult {
   key: string;
@@ -6,12 +6,12 @@ export interface JiraCreateResult {
 }
 
 export interface JiraIssueClient {
-  createIssue(draft: JiraIssueDraft): Promise<JiraCreateResult>;
+  createIssue(draft: VersionedDraft): Promise<JiraCreateResult>;
 }
 
 /** Explicit fail-closed adapter until the Jira create and reconciliation pipeline is implemented. */
 export class DisabledJiraIssueClient implements JiraIssueClient {
-  async createIssue(_draft: JiraIssueDraft): Promise<JiraCreateResult> {
+  async createIssue(_draft: VersionedDraft): Promise<JiraCreateResult> {
     throw new Error("Jira writes are disabled in the scaffold");
   }
 }

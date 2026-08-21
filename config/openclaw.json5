@@ -11,7 +11,13 @@
         name: "Idea-to-Jira MVP",
         workspace: "/home/node/.openclaw/workspace",
         tools: {
-          allow: ["idea_to_jira_validate_draft"],
+          allow: [
+            "idea_to_jira_create_draft",
+            "idea_to_jira_read_draft",
+            "idea_to_jira_patch_draft",
+            "idea_to_jira_cancel_draft",
+            "idea_to_jira_request_access",
+          ],
         },
       },
     ],
@@ -83,11 +89,18 @@
             sha256: "59fae2568168a4859458763ca08dbe9c5e35af81481553e336faec6cd3a2501b",
           },
           sttModel: "medium",
-          allowedTools: ["idea_to_jira_validate_draft"],
+          allowedTools: [
+            "idea_to_jira_create_draft",
+            "idea_to_jira_read_draft",
+            "idea_to_jira_patch_draft",
+            "idea_to_jira_cancel_draft",
+            "idea_to_jira_request_access",
+          ],
           limits: {
             inputTextChars: 20000,
             requestsPerMinute: 20,
             burst: 5,
+            activeDrafts: 3,
           },
           retention: {
             draftDays: 90,

@@ -4,7 +4,13 @@
   "description": "Fail-closed runtime, configuration, and security foundation for the Idea-to-Jira workflow.",
   "version": "0.1.0",
   "contracts": {
-    "tools": ["idea_to_jira_validate_draft"]
+    "tools": [
+      "idea_to_jira_create_draft",
+      "idea_to_jira_read_draft",
+      "idea_to_jira_patch_draft",
+      "idea_to_jira_cancel_draft",
+      "idea_to_jira_request_access"
+    ]
   },
   "configSchema": {
     "type": "object",
@@ -76,19 +82,26 @@
       "sttModel": { "const": "medium" },
       "allowedTools": {
         "type": "array",
-        "minItems": 1,
-        "maxItems": 1,
-        "prefixItems": [{ "const": "idea_to_jira_validate_draft" }],
+        "minItems": 5,
+        "maxItems": 5,
+        "prefixItems": [
+          { "const": "idea_to_jira_create_draft" },
+          { "const": "idea_to_jira_read_draft" },
+          { "const": "idea_to_jira_patch_draft" },
+          { "const": "idea_to_jira_cancel_draft" },
+          { "const": "idea_to_jira_request_access" }
+        ],
         "items": false
       },
       "limits": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["inputTextChars", "requestsPerMinute", "burst"],
+        "required": ["inputTextChars", "requestsPerMinute", "burst", "activeDrafts"],
         "properties": {
           "inputTextChars": { "type": "integer", "minimum": 1, "maximum": 50000 },
           "requestsPerMinute": { "type": "integer", "minimum": 1, "maximum": 1000 },
-          "burst": { "type": "integer", "minimum": 1, "maximum": 1000 }
+          "burst": { "type": "integer", "minimum": 1, "maximum": 1000 },
+          "activeDrafts": { "type": "integer", "minimum": 1, "maximum": 100 }
         }
       },
       "retention": {

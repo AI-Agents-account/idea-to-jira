@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-export const IDEA_TO_JIRA_TOOL = "idea_to_jira_validate_draft" as const;
+export const IDEA_TO_JIRA_TOOLS = Object.freeze([
+  "idea_to_jira_create_draft",
+  "idea_to_jira_read_draft",
+  "idea_to_jira_patch_draft",
+  "idea_to_jira_cancel_draft",
+  "idea_to_jira_request_access",
+] as const);
+export type IdeaToJiraToolName = (typeof IDEA_TO_JIRA_TOOLS)[number];
 export const FIXED_JIRA_SCOPE = Object.freeze({
   projectKey: "FPF",
   projectId: "18100",
@@ -47,11 +54,12 @@ export interface EffectiveConfig {
     readonly sha256: string;
   };
   readonly sttModel: "medium";
-  readonly allowedTools: readonly [typeof IDEA_TO_JIRA_TOOL];
+  readonly allowedTools: readonly IdeaToJiraToolName[];
   readonly limits: {
     readonly inputTextChars: number;
     readonly requestsPerMinute: number;
     readonly burst: number;
+    readonly activeDrafts: number;
   };
   readonly retention: {
     readonly draftDays: number;
@@ -93,7 +101,7 @@ const JIRA_KEYS = [
   "writeMode",
 ] as const;
 const CATALOG_KEYS = ["path", "schemaVersion", "sha256"] as const;
-const LIMIT_KEYS = ["inputTextChars", "requestsPerMinute", "burst"] as const;
+const LIMIT_KEYS = ["inputTextChars", "requestsPerMinute", "burst", "activeDrafts"] as const;
 const RETENTION_KEYS = ["draftDays", "auditDays"] as const;
 
 function object(value: unknown): JsonObject | undefined {
@@ -195,7 +203,11 @@ export function loadEffectiveConfig(
   if (jira.writeMode !== "disabled") return { ok: false, code: "CREATE_GATE_INVALID" };
 
   const allowedTools = root.allowedTools;
-  if (!Array.isArray(allowedTools) || allowedTools.length !== 1 || allowedTools[0] !== IDEA_TO_JIRA_TOOL) {
+  if (
+    !Array.isArray(allowedTools) ||
+    allowedTools.length !== IDEA_TO_JIRA_TOOLS.length ||
+    allowedTools.some((tool, index) => tool !== IDEA_TO_JIRA_TOOLS[index])
+  ) {
     return { ok: false, code: "TOOL_ALLOWLIST_INVALID" };
   }
 
@@ -240,10 +252,11 @@ export function loadEffectiveConfig(
   const inputTextChars = integer(limits.inputTextChars, 1, 50_000);
   const requestsPerMinute = integer(limits.requestsPerMinute, 1, 1_000);
   const burst = integer(limits.burst, 1, 1_000);
+  const activeDrafts = integer(limits.activeDrafts, 1, 100);
   const draftDays = integer(retention.draftDays, 1, 3_650);
   const auditDays = integer(retention.auditDays, 1, 3_650);
   const stateDir = string(root.stateDir);
-  if (!inputTextChars || !requestsPerMinute || !burst || burst > requestsPerMinute || !draftDays || !auditDays || !stateDir) {
+  if (!inputTextChars || !requestsPerMinute || !burst || burst > requestsPerMinute || !activeDrafts || !draftDays || !auditDays || !stateDir) {
     return { ok: false, code: "CONFIG_INVALID" };
   }
   if (root.sttModel !== "medium") return { ok: false, code: "CONFIG_INVALID" };
@@ -266,8 +279,8 @@ export function loadEffectiveConfig(
       }),
       catalog: Object.freeze({ path: catalogPath, schemaVersion: 1, sha256: catalogSha256 }),
       sttModel: "medium",
-      allowedTools: Object.freeze([IDEA_TO_JIRA_TOOL]) as readonly [typeof IDEA_TO_JIRA_TOOL],
-      limits: Object.freeze({ inputTextChars, requestsPerMinute, burst }),
+      allowedTools: IDEA_TO_JIRA_TOOLS,
+      limits: Object.freeze({ inputTextChars, requestsPerMinute, burst, activeDrafts }),
       retention: Object.freeze({ draftDays, auditDays }),
       stateDir,
     }),

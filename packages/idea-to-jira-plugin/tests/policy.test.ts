@@ -16,17 +16,17 @@ const requester: TrustedRequesterContext = {
 test("token bucket is isolated by sender and operation and refills deterministically", () => {
   let now = 0;
   const limiter = new TokenBucketRateLimiter(
-    { inputTextChars: 100, requestsPerMinute: 60, burst: 2 },
+    { inputTextChars: 100, requestsPerMinute: 60, burst: 2, activeDrafts: 3 },
     () => now,
   );
-  assert.equal(limiter.consume(requester, "validate_draft").allowed, true);
-  assert.equal(limiter.consume(requester, "validate_draft").allowed, true);
-  assert.equal(limiter.consume(requester, "validate_draft").allowed, false);
+  assert.equal(limiter.consume(requester, "draft_tool").allowed, true);
+  assert.equal(limiter.consume(requester, "draft_tool").allowed, true);
+  assert.equal(limiter.consume(requester, "draft_tool").allowed, false);
   assert.equal(limiter.consume(requester, "model_run").allowed, true);
-  assert.equal(limiter.consume({ ...requester, senderId: "987654321", chatId: "987654321" }, "validate_draft").allowed, true);
+  assert.equal(limiter.consume({ ...requester, senderId: "987654321", chatId: "987654321" }, "draft_tool").allowed, true);
 
   now = 1_000;
-  assert.equal(limiter.consume(requester, "validate_draft").allowed, true);
+  assert.equal(limiter.consume(requester, "draft_tool").allowed, true);
 });
 
 test("payload limit rejects oversized and non-serializable input", () => {

@@ -78,12 +78,12 @@ function assertRuntimeOwner(path: string): void {
   assert.equal(statSync(path).gid, process.getgid());
 }
 
-test("fresh storage schema v3 is deterministic and fixes canonical persistent enums", () => {
+test("fresh storage schema v4 is deterministic and fixes canonical persistent enums", () => {
   const stateDir = stateDirectory("fresh");
   const storage = openPluginDatabase({ stateDir });
   assert.deepEqual(storage.health, {
     healthy: true,
-    schemaVersion: 3,
+    schemaVersion: 4,
     quickCheck: "ok",
     foreignKeyViolations: 0,
   });
@@ -286,8 +286,8 @@ test("migration runner upgrades v0, is repeat-safe and rejects changed history",
   const path = join(stateDirectory("upgrade"), "upgrade.sqlite3");
   const database = new DatabaseSync(path);
   assert.equal(runMigrations(database, []), 0);
-  assert.equal(runMigrations(database, migrations), 3);
-  assert.equal(runMigrations(database, migrations), 3);
+  assert.equal(runMigrations(database, migrations), 4);
+  assert.equal(runMigrations(database, migrations), 4);
   database.prepare("UPDATE schema_migrations SET checksum = ? WHERE version = 1").run(HASH_B);
   assert.throws(
     () => runMigrations(database, migrations),
@@ -301,12 +301,49 @@ test("v2 RBAC upgrade backfills opaque action references and rejects later remov
   runMigrations(database, migrations.slice(0, 2));
   database.prepare("INSERT INTO users(id, telegram_sender_id) VALUES (?, ?)").run("user-1", "123456789");
   database.prepare("INSERT INTO access_requests(id, user_id) VALUES (?, ?)").run("request-1", "user-1");
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.prepare("INSERT INTO drafts(id, owner_user_id) VALUES (?, ?)").run("draft-legacy", "user-1");
+    database.prepare(`
+      INSERT INTO draft_versions(
+        draft_id, version, summary, problem, desired_outcome, evidence_json, provenance_hash
+      ) VALUES (?, 1, ?, ?, ?, ?, ?)
+    `).run("draft-legacy", "Legacy summary", "Legacy context", "Legacy goal", '["Legacy metric"]', HASH_A);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 
-  assert.equal(runMigrations(database, migrations), 3);
+  assert.equal(runMigrations(database, migrations), 4);
   const row = database.prepare("SELECT action_ref FROM access_requests WHERE id = ?").get("request-1") as {
     action_ref: string;
   };
   assert.match(row.action_ref, /^[a-f0-9]{48}$/);
+  const backfill = database.prepare(`
+    SELECT domain_json, completeness_json, readiness_json, draft_schema_version, formatter_version
+    FROM draft_versions WHERE draft_id = 'draft-legacy' AND version = 1
+  `).get() as {
+    domain_json: string;
+    completeness_json: string;
+    readiness_json: string;
+    draft_schema_version: number;
+    formatter_version: number;
+  };
+  const domain = JSON.parse(backfill.domain_json) as Record<string, { value: unknown; provenance: string }>;
+  assert.deepEqual(domain.summary, { value: "Legacy summary", provenance: "USER_STATED" });
+  assert.deepEqual(domain.targetAudience, { value: null, provenance: "UNKNOWN" });
+  assert.deepEqual(JSON.parse(backfill.completeness_json), { complete: false, reasons: ["LEGACY_INCOMPLETE"] });
+  assert.equal((JSON.parse(backfill.readiness_json) as { ready: boolean }).ready, false);
+  assert.equal(backfill.draft_schema_version, 1);
+  assert.equal(backfill.formatter_version, 1);
+  assert.throws(
+    () => database.prepare(`
+      UPDATE draft_versions SET summary = 'Changed'
+      WHERE draft_id = 'draft-legacy' AND version = 1
+    `).run(),
+    /DRAFT_VERSION_IMMUTABLE/,
+  );
   assert.throws(
     () => database.prepare("UPDATE access_requests SET action_ref = NULL WHERE id = ?").run("request-1"),
     /ACCESS_REQUEST_ACTION_REF_REQUIRED/,
@@ -353,8 +390,8 @@ test("an untracked application table is rejected without adopting or mutating it
 test("future and partially recorded schema versions fail closed", () => {
   const future = new DatabaseSync(join(stateDirectory("future"), "future.sqlite3"));
   runMigrations(future, migrations);
-  future.prepare("INSERT INTO schema_migrations(version, name, checksum) VALUES (4, ?, ?)").run("future", HASH_B);
-  future.exec("PRAGMA user_version = 4");
+  future.prepare("INSERT INTO schema_migrations(version, name, checksum) VALUES (5, ?, ?)").run("future", HASH_B);
+  future.exec("PRAGMA user_version = 5");
   assert.throws(
     () => runMigrations(future, migrations),
     (error) => error instanceof MigrationError && error.code === "MIGRATION_FUTURE_SCHEMA",
@@ -380,14 +417,14 @@ test("non-empty schema upgrade requires and verifies a consistent pre-upgrade ba
   await storage.createConsistentBackup(backupPath);
   storage.close();
 
-  const fourthMigration = defineMigration(4, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;");
-  const registry = [...migrations, fourthMigration];
+  const fifthMigration = defineMigration(5, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;");
+  const registry = [...migrations, fifthMigration];
   assert.throws(
     () => openPluginDatabase({ stateDir, migrationRegistry: registry }),
     /STORAGE_UPGRADE_BACKUP_REQUIRED/,
   );
   const upgraded = openPluginDatabase({ stateDir, migrationRegistry: registry, upgradeBackupPath: backupPath });
-  assert.equal(upgraded.health.schemaVersion, 4);
+  assert.equal(upgraded.health.schemaVersion, 5);
   const marker = withSql(upgraded, (sql) => sql.prepare(
     "SELECT count(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'upgrade_marker'",
   ).get()) as { count: number };
@@ -407,7 +444,7 @@ test("tampered pre-upgrade backup is rejected by the production startup path", a
   tampered.close();
   const registry = [
     ...migrations,
-    defineMigration(4, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;"),
+    defineMigration(5, "upgrade_marker", "CREATE TABLE upgrade_marker(id INTEGER PRIMARY KEY) STRICT;"),
   ];
   assert.throws(
     () => openPluginDatabase({ stateDir, migrationRegistry: registry, upgradeBackupPath: backupPath }),
