@@ -144,7 +144,7 @@ mkdir -p data/state data/workspace data/plugin-state data/auth-profile-secrets
 
 `data/state` хранит OpenClaw state и auth profiles, а `data/auth-profile-secrets` — локальный encryption key для OAuth-токенов. Для восстановления OAuth нужны оба каталога; не переносите только один из них и не добавляйте их содержимое в Git.
 
-Compose передаёт весь `.env` непосредственно в Gateway и CLI-контейнеры через `env_file`. Поэтому `scripts/pilot-up.sh` и container entrypoint независимо отклоняют `JIRA_TOKEN` и `OPENAI_API_KEY`: Stage-05A использует только ChatGPT/Codex OAuth и не допускает Jira credential даже в пустом виде.
+Compose использует `.env` только для интерполяции и передаёт в Gateway/CLI явный allowlist runtime-переменных из `environment`; посторонние значения из файла, включая GitHub credentials, в контейнер не попадают. `scripts/pilot-up.sh` и container entrypoint дополнительно отклоняют `JIRA_TOKEN` и `OPENAI_API_KEY`: Stage-05A использует только ChatGPT/Codex OAuth и не допускает Jira credential даже в пустом виде.
 
 ### Однокомандный controlled pilot
 

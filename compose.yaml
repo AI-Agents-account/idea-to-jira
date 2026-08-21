@@ -6,8 +6,6 @@ x-openclaw-common: &openclaw-common
     context: .
     args:
       OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.7.1-2}
-  env_file:
-    - .env
   environment:
     HOME: /home/node
     OPENCLAW_CONFIG_PATH: /home/node/config/openclaw.json5

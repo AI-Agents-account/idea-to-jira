@@ -136,7 +136,7 @@ sudo chown -R "$runtime_uid:$runtime_gid" data/plugin-state
 chmod 0700 data/plugin-state
 docker run --rm --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
-  --mount type=bind,src="$PWD/data/plugin-state",dst=/home/node/.openclaw/plugin-state \
+  --mount type=bind,src="$PWD/data/plugin-state",dst=/home/node/plugin-state \
   --entrypoint node "$image" /app/scripts/storage-container-check.mjs
 ```
 

@@ -41,13 +41,13 @@ test("manifest and host config expose only the Stage-05 typed Draft/access tools
   }
 });
 
-test("Compose injects the guarded env file and keeps Gateway loopback-only", async () => {
+test("Compose maps only guarded runtime values and keeps Gateway loopback-only", async () => {
   const compose = await text("compose.yaml");
   const dockerfile = await text("Dockerfile");
   const pilotUp = await text("scripts/pilot-up.sh");
   const pilotReadiness = await text("scripts/pilot-readiness.mjs");
   const containerEntrypoint = await text("scripts/pilot-container-entrypoint.sh");
-  assert.match(compose, /env_file:\s*\n\s*- \.env/);
+  assert.doesNotMatch(compose, /\benv_file:/);
   assert.match(compose, /127\.0\.0\.1:\$\{OPENCLAW_GATEWAY_PORT:-18789\}:18789/);
   assert.match(compose, /OPENCLAW_GATEWAY_PORT: "18789"/);
   assert.match(compose, /JIRA_BASE_URL: \$\{JIRA_BASE_URL:\?/);

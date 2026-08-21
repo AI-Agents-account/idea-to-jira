@@ -50,8 +50,8 @@ docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
 [ -f "$ENV_FILE" ] || fail "environment file not found: $ENV_FILE"
 
 # Stage-05A is subscription-backed and must contain no Jira credential.
-# The Compose env_file is injected wholesale, so reject forbidden credentials
-# before rendering or creating a container.
+# Reject forbidden pilot credentials before rendering or creating a container,
+# even though Compose maps only an explicit allowlist of runtime variables.
 for forbidden_key in JIRA_TOKEN OPENAI_API_KEY; do
   if grep -Eq "^[[:space:]]*(export[[:space:]]+)?${forbidden_key}[[:space:]]*=" "$ENV_FILE"; then
     fail "$forbidden_key must be absent from $ENV_FILE for the controlled pilot"
