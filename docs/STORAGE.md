@@ -8,7 +8,7 @@ Stage 02 uses the built-in `node:sqlite` API from the pinned Node `24.19.0` runt
 <stateDir>/idea-to-jira.sqlite3
 ```
 
-The effective `stateDir` comes from validated server-side configuration. It is not accepted from a user or model request. Startup uses an OpenClaw plugin service; requests and tools stay fail-closed until migration and consistency checks succeed. Jira create remains disabled independently of storage health.
+The effective `stateDir` comes from validated server-side configuration. It is not accepted from a user or model request. Startup uses an OpenClaw plugin service; requests and tools stay fail-closed until migration and consistency checks succeed. Storage health alone never enables Jira create; metadata readiness, duplicate binding, dynamic-field support, and an exact durable confirmation are independent gates.
 
 ## 2. Filesystem and connection policy
 
@@ -122,7 +122,7 @@ Host checks:
 ```bash
 npm run test
 npm run check
-npm run verify:create-disabled
+npm run verify:create-contract
 ```
 
 Target-container check:

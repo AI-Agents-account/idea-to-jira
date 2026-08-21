@@ -5,8 +5,8 @@
 ## Safety invariants
 
 - Keep `dmPolicy: "allowlist"`, `groupPolicy: "disabled"`, exact `TELEGRAM_PILOT_SENDER_ID`, peer-scoped sessions and the five-tool allowlist unchanged.
-- Do not set or inject `JIRA_TOKEN`. `JIRA_BASE_URL` may remain `https://jira.invalid`; no pilot step requires Jira.
-- `writeMode` must remain `disabled`; `jira_create`, generic HTTP, browser, exec, filesystem and arbitrary message tools must remain absent.
+- Do not put `JIRA_TOKEN` in `.env`. This text-only pilot leaves `data/secrets/jira-token` absent, so Jira tools remain unavailable while Draft continues to work.
+- Generic HTTP, browser, exec, filesystem and arbitrary message tools remain absent; Jira tools are conditionally exposed only when the runtime file-secret exists.
 - Catalog placeholder is not active evidence. Do not attempt duplicate, READY or create. A verified Catalog must precede all three in a future stage.
 - Stop on any unexpected sender/model/tool, storage/readiness failure, Draft mutation from non-text input, raw private payload in logs, or external Jira request.
 
@@ -35,13 +35,13 @@ Inspect the rendered Compose config without pasting output into the evidence rec
 docker compose --env-file .env config --quiet
 ```
 
-Confirm manually that `JIRA_TOKEN` is absent from `.env` and rendered container environment. Do not use a real Jira origin or credential to make readiness pass.
+Confirm manually that `JIRA_TOKEN` is absent from `.env` and rendered container environment and that `data/secrets/jira-token` is absent for this no-Jira pilot. Do not use a real Jira origin or credential to make readiness pass.
 
 ## 2. Prepare controlled runtime
 
 1. Create `.env` from `.env.example` outside review artifacts.
 2. Set a dedicated bot token, one numeric pilot sender ID, a new Gateway token, trusted admin/PO numeric routes, and a reviewed `OPENAI_MODEL=openai/<available-model>`. For this one-actor pilot, include the same pilot ID in `BUSINESS_ADMIN_TELEGRAM_IDS`; startup fails closed otherwise.
-3. Keep `JIRA_BASE_URL=https://jira.invalid`; do not add `JIRA_TOKEN`.
+3. Keep `JIRA_BASE_URL=https://jira.invalid`; do not add `JIRA_TOKEN` or `data/secrets/jira-token`.
 4. Create private persistent mounts:
 
 ```bash
@@ -80,7 +80,7 @@ Expected final readiness fields: `status=ready mode=live-local`, `runtime=ready`
 Also confirm create readiness remains closed:
 
 ```bash
-docker compose exec openclaw-gateway node /app/scripts/create-readiness.mjs --expect-disabled
+docker compose exec openclaw-gateway node /app/scripts/create-readiness.mjs --verify-contract
 ```
 
 Any non-zero pilot readiness is a stop. Fix configuration/auth/storage offline; never switch DM to open, add tools, provide Jira credentials, or bypass checks.

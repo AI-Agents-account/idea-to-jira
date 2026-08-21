@@ -116,11 +116,11 @@ cp .env.example .env
 | `TELEGRAM_PILOT_SENDER_ID` | Единственный numeric Telegram sender ID для controlled DM pilot; тот же ID повторно проверяет plugin runtime. |
 | `OPENAI_MODEL` | Reviewed canonical route `openai/<available-model>` для агента. Placeholder из `.env.example` не live-ready. |
 | `JIRA_BASE_URL` | HTTPS origin целевой Jira без публикации внутреннего адреса в документации. |
-| `JIRA_TOKEN` | **Не задавать для Stage-05A.** Compose не инжектирует Jira credential; pilot не делает Jira GET/POST. |
+| Jira credential | Не добавлять в `.env`. Положить token в ignored-файл `data/secrets/jira-token` с mode `0600`; без файла Draft работает, а Jira workflow недоступен. |
 | `BUSINESS_ADMIN_TELEGRAM_IDS` | Разделённые запятыми numeric sender IDs доверенных администраторов. Controlled one-actor pilot требует включить `TELEGRAM_PILOT_SENDER_ID`; только allowlisted host-derived IDs могут выполнять Stage-04 transitions. |
 | `PRODUCT_OWNER_TELEGRAM_IDS` | Server-side allowlist numeric Telegram destinations для будущих PO notifications; startup проверяет формат и непустое значение. |
 
-Stage-05A сохраняет Jira write disabled. Следующий Jira MVP contract задаёт в plugin/deployment config Jira URL, project key, issue-type name, fixed JQL, список читаемых issue fields и bounds; numeric Jira IDs/schema получаются только при startup/refresh. Credential остаётся runtime secret и не должен попадать в Git.
+Jira MVP задаёт в plugin/deployment config Jira URL, project key, issue-type name, fixed JQL, список читаемых issue fields и bounds; numeric Jira IDs/schema получаются только при startup/refresh. Create доступен лишь после discovery, duplicate decision, dynamic-field validation, exact preview и actor/chat/version-bound confirmation. Credential остаётся runtime file-secret и не попадает в effective config, Git, SQLite, audit или model context.
 
 Сгенерировать Gateway token можно локально одним из способов:
 
@@ -139,12 +139,14 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 Создайте постоянные runtime-каталоги до первого запуска:
 
 ```bash
-mkdir -p data/state data/workspace data/plugin-state data/auth-profile-secrets
+mkdir -p data/state data/workspace data/plugin-state data/auth-profile-secrets data/secrets
+chmod 700 data/secrets
+# Для Jira-enabled deployment: install -m 600 /secure/source/jira-token data/secrets/jira-token
 ```
 
-`data/state` хранит OpenClaw state и auth profiles, а `data/auth-profile-secrets` — локальный encryption key для OAuth-токенов. Для восстановления OAuth нужны оба каталога; не переносите только один из них и не добавляйте их содержимое в Git.
+`data/state` хранит OpenClaw state и auth profiles, `data/auth-profile-secrets` — локальный encryption key для OAuth-токенов, а `data/secrets/jira-token` — optional Jira runtime credential. Не добавляйте содержимое этих каталогов в Git.
 
-Compose использует `.env` только для интерполяции и передаёт в Gateway/CLI явный allowlist runtime-переменных из `environment`; посторонние значения из файла, включая GitHub credentials, в контейнер не попадают. `scripts/pilot-up.sh` и container entrypoint дополнительно отклоняют `JIRA_TOKEN` и `OPENAI_API_KEY`: Stage-05A использует только ChatGPT/Codex OAuth и не допускает Jira credential даже в пустом виде.
+Compose использует `.env` только для интерполяции и передаёт в Gateway/CLI явный allowlist runtime-переменных; посторонние значения, включая GitHub credentials, не попадают в контейнер. `scripts/pilot-up.sh` и container entrypoint отклоняют inline `JIRA_TOKEN` и `OPENAI_API_KEY`; Jira token доступен только как read-only file-secret.
 
 ### Однокомандный controlled pilot
 
@@ -256,7 +258,7 @@ docker compose exec openclaw-gateway node /app/scripts/create-readiness.mjs
 docker compose logs --follow --tail=100 openclaw-gateway
 ```
 
-Healthcheck подтверждает только liveness HTTP endpoint Gateway. `pilot-readiness.mjs` локально проверяет controlled DM/model/tool/Jira-disabled boundaries и через authenticated loopback Gateway RPC требует `READY` именно от активного поколения plugin runtime с healthy storage; отдельное открытие SQLite не считается runtime-readiness. Скрипт не вызывает Telegram, OpenAI или Jira. Отдельный `create-readiness.mjs` намеренно возвращает `CREATE_DISABLED` и non-zero до реализации всех create preconditions; pilot readiness не подменяет create-readiness.
+Healthcheck подтверждает только liveness HTTP endpoint Gateway. `pilot-readiness.mjs` локально проверяет controlled DM/model/tool/Jira readiness boundaries и через authenticated loopback Gateway RPC требует `READY` именно от активного поколения plugin runtime с healthy storage; отдельное открытие SQLite не считается runtime-readiness. Скрипт не вызывает Telegram, OpenAI или Jira. Отдельный `create-readiness.mjs` проверяет статический confirmation/tool contract; фактическая create-readiness остаётся runtime-сигналом discovery и не подменяется pilot readiness.
 
 ## Безопасность и граница запуска
 
