@@ -1,5 +1,7 @@
 import { join } from "node:path";
 
+import { AccessService } from "./access/access-service.js";
+import { registerAccessCommands } from "./access/commands.js";
 import { createAuditEvent, hashAuditActorReference, SqliteAuditWriter } from "./audit/index.js";
 import { isSafeErrorCode, SafeError } from "./errors/index.js";
 import { createCorrelationContext, StructuredLogger } from "./observability/index.js";
@@ -103,6 +105,7 @@ const plugin = {
     const limiter = new TokenBucketRateLimiter(config.limits);
     const logger = new StructuredLogger(api.logger);
     let storage: PluginDatabase | undefined;
+    let accessService: AccessService | undefined;
     let storageFailureCode = "STORAGE_NOT_READY";
 
     api.registerService({
@@ -113,6 +116,10 @@ const plugin = {
             stateDir: config.stateDir,
             upgradeBackupPath: join(config.stateDir, UPGRADE_BACKUP_FILENAME),
           });
+          accessService = new AccessService({
+            unitOfWork: storage.repositories,
+            config,
+          });
           storageFailureCode = "STORAGE_NOT_READY";
           logger.emit("INFO", {
             timestamp: new Date().toISOString(),
@@ -122,6 +129,7 @@ const plugin = {
           });
         } catch {
           storage = undefined;
+          accessService = undefined;
           storageFailureCode = "STORAGE_STARTUP_FAILED";
           logger.emit("ERROR", {
             timestamp: new Date().toISOString(),
@@ -135,6 +143,7 @@ const plugin = {
       stop() {
         const activeStorage = storage;
         storage = undefined;
+        accessService = undefined;
         storageFailureCode = "STORAGE_NOT_READY";
         activeStorage?.close();
       },
@@ -143,6 +152,8 @@ const plugin = {
     // Keep the disabled adapter in the effective service graph so no future handler can
     // accidentally obtain an unguarded Jira client from this foundation.
     void jira;
+
+    registerAccessCommands(api, config, () => accessService);
 
     api.on(
       "before_agent_run",
@@ -174,6 +185,17 @@ const plugin = {
           return {
             outcome: "block",
             reason: recorded ? requester.code : "AUDIT_REQUIRED",
+            message: "This request is unavailable.",
+            category: "access_policy",
+          };
+        }
+
+        try {
+          accessService?.ensureUser(requester.context);
+        } catch {
+          return {
+            outcome: "block",
+            reason: "ACCESS_REQUEST_CONFLICT",
             message: "This request is unavailable.",
             category: "access_policy",
           };

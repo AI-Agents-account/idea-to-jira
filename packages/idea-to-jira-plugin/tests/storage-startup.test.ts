@@ -67,6 +67,8 @@ test("storage service gates requests until schema health succeeds and closes cle
       beforeAgentRun = handler;
     },
     registerTool(factory: typeof toolFactory) { toolFactory = factory; },
+    registerCommand() {},
+    runtime: { channel: { outbound: { loadAdapter: async () => undefined } } },
   } as unknown as OpenClawPluginApi;
 
   plugin.register(api);

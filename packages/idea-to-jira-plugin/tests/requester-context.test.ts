@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
+import type { OpenClawPluginToolContext, PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginHookAgentContext, PluginHookBeforeAgentRunEvent } from "openclaw/plugin-sdk/types";
 
 import {
   requesterFromAgentRun,
+  requesterFromCommandContext,
   requesterFromToolContext,
   validateRequesterFacts,
 } from "../src/runtime/requester-context.js";
@@ -75,6 +76,25 @@ test("extracts identity from trusted tool factory context, never tool arguments"
   assert.deepEqual(requesterFromToolContext({ ...context, oneShotCliRun: true }, config), {
     ok: false,
     code: "TRIGGER_DENIED",
+  });
+});
+
+test("native Telegram command adapter binds channel-qualified From/To to the trusted sender", () => {
+  const context = {
+    agentId: "idea-mvp",
+    channel: "telegram",
+    senderId: "123456789",
+    accountId: "idea-mvp",
+    from: "telegram:123456789",
+    to: "telegram:123456789",
+  } as PluginCommandContext;
+  assert.equal(requesterFromCommandContext(context, config).ok, true);
+  assert.deepEqual(requesterFromCommandContext({
+    ...context,
+    to: "telegram:987654321",
+  }, config), {
+    ok: false,
+    code: "DESTINATION_DENIED",
   });
 });
 

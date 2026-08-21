@@ -25,7 +25,7 @@ The effective `stateDir` comes from validated server-side configuration. It is n
 
 Container deployments must ensure the bind-mounted `data/plugin-state` path is owned by the UID/GID used by the target image. CI discovers that identity from the built image instead of assuming a host UID.
 
-## 3. Storage schema v2
+## 3. Storage schema v3
 
 Migration `001_initial_schema` creates the domain schema v1:
 
@@ -43,7 +43,7 @@ Important invariants are database-enforced:
 
 - foreign keys and strict tables;
 - one active access request per user;
-- one active grant per user and role;
+- one live (`ACTIVE` or `SUSPENDED`) grant per user and role;
 - immutable `(draft_id, version)` rows;
 - operation uniqueness on `(draft_id, draft_version, payload_hash)` plus a separate unique local idempotency key;
 - required attempt count/timestamps before `POSTING`, with Jira identity permitted only in `CREATED`;
@@ -55,6 +55,8 @@ Important invariants are database-enforced:
 Payload hashes and local operation IDs are local consistency keys only. They are not Jira identities and never justify an automatic retry from `UNKNOWN`.
 
 Migration `002_audit_observability_baseline` advances the storage schema to version 2. It adds versioned audit correlation/correction/retention fields and record-level retention classes without changing legacy actor/outcome values. Existing audit rows are marked `LEGACY`, keep unknown correlation fields `NULL`, and retain their original actor/outcome. New application writes go only through `SqliteAuditWriter`; `AuditedCriticalOperation` makes a critical mutation and audit insert one transaction. The full contract is in [`AUDIT_OBSERVABILITY.md`](AUDIT_OBSERVABILITY.md).
+
+Migration `003_rbac_access_requests` advances the schema to version 3. It adds bounded untrusted identity snapshots and decision reasons, creates/backfills unique opaque action references, rejects later missing action references, and replaces active-only role uniqueness with a live-grant constraint covering both `ACTIVE` and `SUSPENDED`. It does not infer or backfill Creator grants. Access/role transitions and recovery behavior are documented in [`RBAC_ACCESS.md`](RBAC_ACCESS.md).
 
 ## 4. Migration contract
 
@@ -136,4 +138,4 @@ docker run --rm --read-only \
   --entrypoint node "$image" /app/scripts/storage-container-check.mjs
 ```
 
-The automated suite covers fresh install, v0/v1 upgrade, mandatory/tampered pre-upgrade backup, repeat execution, interrupted migration rollback, checksum drift, future/partial schema rejection, audit history preservation, head/version FK integrity, constraints, CAS, concurrent claim, atomic audited failure, abrupt-process WAL restart, production-path restore, corruption, ownership and private modes.
+The automated suite covers fresh install, v0/v1/v2 upgrade, mandatory/tampered pre-upgrade backup, repeat execution, interrupted migration rollback, checksum drift, future/partial schema rejection, audit history preservation, RBAC transition/concurrency/replay/spoofing checks, head/version FK integrity, constraints, CAS, concurrent claim, atomic audited failure, abrupt-process WAL restart, production-path restore, corruption, ownership and private modes.
