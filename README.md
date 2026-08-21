@@ -2,7 +2,7 @@
 
 **Статус: production-oriented scaffold и controlled Stage-05A text-pilot candidate, не production MVP; Jira write отключён, реализованы Stage-01—05 foundation и fail-closed pilot boundaries.**
 
-Репозиторий задаёт ориентированный на production каркас выделенного Telegram-бота и выделенного агента OpenClaw. Целевая система должна помогать автору структурировать продуктовую идею, безопасно проверять роль и дубли и создавать Jira `Feature` в фиксированном контуре. Сейчас этот процесс существует только как требования и целевая архитектура: запуск контейнера не даёт готовый пользовательский MVP и не должен получать production-трафик.
+Репозиторий задаёт ориентированный на production каркас выделенного Telegram-бота и выделенного агента OpenClaw. Целевая система должна помогать автору структурировать продуктовую идею, безопасно проверять роль и дубли и создавать Jira issue настроенного типа в настроенном проекте. Сейчас этот процесс существует только как требования и целевая архитектура: запуск контейнера не даёт готовый пользовательский MVP и не должен получать production-трафик.
 
 ## Что реализовано сейчас
 
@@ -120,7 +120,7 @@ cp .env.example .env
 | `BUSINESS_ADMIN_TELEGRAM_IDS` | Разделённые запятыми numeric sender IDs доверенных администраторов. Controlled one-actor pilot требует включить `TELEGRAM_PILOT_SENDER_ID`; только allowlisted host-derived IDs могут выполнять Stage-04 transitions. |
 | `PRODUCT_OWNER_TELEGRAM_IDS` | Server-side allowlist numeric Telegram destinations для будущих PO notifications; startup проверяет формат и непустое значение. |
 
-Jira project/type (`FPF`/`18100`, `Feature`/`11500`), Catalog path/checksum и `writeMode: "disabled"` закреплены server-side в plugin config и не имеют environment override. Для pilot оставьте `JIRA_BASE_URL=https://jira.invalid` и не добавляйте Jira credential.
+Stage-05A сохраняет Jira write disabled. Следующий Jira MVP contract задаёт в plugin/deployment config Jira URL, project key, issue-type name, fixed JQL, список читаемых issue fields и bounds; numeric Jira IDs/schema получаются только при startup/refresh. Credential остаётся runtime secret и не должен попадать в Git.
 
 Сгенерировать Gateway token можно локально одним из способов:
 

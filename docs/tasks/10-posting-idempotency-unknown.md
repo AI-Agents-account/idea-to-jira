@@ -1,5 +1,7 @@
 # 10. Posting state machine, atomic claim, idempotency и `UNKNOWN`
 
+> Обновление 2026-08-21: этот документ — supporting contract внутри [Stage-08 Jira MVP integration](08-jira-metadata-whitelist-mapper.md). При конфликте применяются Stage-08, `docs/JIRA_CREATE_CONTRACT.md` v2 и D-026—D-029; fixed Jira IDs/Catalog-first dependency не применяются.
+
 ## Цель и пользовательская ценность
 
 Гарантировать, что готовый payload порождает не более одной локальной posting operation, concurrent events не делают двойной запрос, а неоднозначный результат всегда блокирует автоматизацию. На этом этапе transport fake/disabled: production POST ещё невозможен.

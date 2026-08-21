@@ -4,15 +4,17 @@
 
 **Дата:** 2026-08-21
 
-**Целевой контур:** выделенный OpenClaw в Docker, Telegram, Jira Server 11.3.8
+**Целевой контур:** выделенный OpenClaw в Docker, Telegram, конфигурируемая Jira Server integration
 
 ## 1. Назначение системы
 
-Idea-to-Jira — выделенный Telegram-ассистент, который помогает сотруднику превратить неструктурированную продуктовую идею в проверенный Draft и, после server-side проверок доступа и дублей, создать Jira `Feature` в фиксированном проекте.
+Idea-to-Jira — выделенный Telegram-ассистент, который помогает сотруднику превратить неструктурированную продуктовую идею в проверенный Draft и, после server-side проверок доступа и дублей, создать Jira issue настроенного типа в настроенном проекте.
 
 Система строится как один выделенный OpenClaw Gateway с одним агентом и mixed plugin `idea-to-jira`. Отдельный прикладной backend не предполагается: детерминированная бизнес-логика, RBAC, состояние Draft, интеграция с Jira и аудит принадлежат плагину, а OpenClaw ведёт диалог, вызывает только разрешённые typed tools и управляет model/channel runtime.
 
 > Текущий репозиторий — production-oriented scaffold, а не готовый MVP. Реализованы stage-01 runtime/config/security, stage-02 SQLite, stage-03 audit/redaction, stage-04 RBAC и stage-05 versioned Draft/readiness foundation. Live Catalog/metadata/duplicate integrations, Jira POST, reconciliation и product notifications остаются следующими этапами.
+
+> Решение 2026-08-21: Jira URL, project key, issue-type name, fixed JQL и список читаемых issue fields принадлежат deployment config. Numeric Jira IDs и create schema обнаруживаются при startup/refresh. Канонический контракт — `docs/JIRA_CREATE_CONTRACT.md` v2 и D-026—D-029.
 
 ## 2. Архитектурные принципы
 
@@ -177,7 +179,7 @@ Catalog отделяет изменяемую бизнес-маршрутиза�
 
 ### 5.5. Jira adapter и mapper
 
-Jira adapter допускает только заранее определённые origin, project, issue type и операции. Mapper собирает payload из whitelist, сверяет обязательные options/create metadata и не передаёт model-generated JSON напрямую.
+Jira adapter допускает только URL, project key, issue-type name, JQL и search fields из deployment config. При startup/refresh он получает актуальные IDs, required fields, defaults/options и permissions. Mapper строит payload из semantic Draft answers и runtime metadata; model-generated JSON напрямую не передаётся.
 
 В текущем scaffold `createIssue()` намеренно всегда возвращает ошибку. Это защищает от ошибочного впечатления, что Docker quickstart уже включает Jira write.
 

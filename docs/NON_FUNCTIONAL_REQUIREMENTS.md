@@ -1,5 +1,8 @@
 # Нефункциональные требования: Idea-to-Jira MVP
 
+> Обновление 2026-08-21: fixed numeric Jira IDs заменены configuration-driven URL/project/type/JQL/search fields и startup/refresh metadata discovery. Security, bounds, idempotency и UNKNOWN invariants сохраняются.
+
+
 **Статус:** актуальная базовая версия для MVP
 **Версия:** 1.0
 **Дата:** 2026-08-20

@@ -1,107 +1,165 @@
-# 08. Jira read metadata, versioned contract и whitelist mapper
+# 08. Полная Jira MVP integration
 
-## Цель и пользовательская ценность
+## Цель
 
-Получить доказанный read-only snapshot create contract Jira Server 11.3.8 и детерминированно построить разрешённый payload, не отправляя POST. Пользователь не столкнётся с выдуманными полями/options; unknown/stale metadata блокирует READY.
+Реализовать configuration-driven vertical flow без hardcoded Jira IDs:
 
-## Почему сейчас
+```text
+startup discovery
+→ configured JQL search
+→ bounded issue context
+→ structured deduplication
+→ dynamic required fields
+→ preview/confirmation
+→ idempotent Jira create
+→ Jira key/link
+```
 
-Duplicate search и create должны использовать fixed Jira boundary. Exact custom-field shapes нельзя выводить из GET существующих issues. Сначала проверяется write schema metadata и mapper на fixtures, потом разрешается сеть записи.
+Stage-05A отдельно не принимается: Telegram/Draft/Jira E2E выполняется после завершения полного flow.
 
-## Зависимости и предусловия
+## Зависимости
 
-Этапы 1–6 (Catalog refs полезны, optional fields могут остаться disabled). Нужны production service account/auth details O-002/O-003 для финального snapshot; разработка начинает с synthetic contract fixtures.
+Реализованные Stages 01–05 и controlled text-pilot foundation. Jira credential предоставляется только как runtime secret. При его отсутствии весь contract реализуется на fake Jira, а live evidence остаётся deployment blocker.
+
+## Configuration contract
+
+Добавить валидируемые настройки:
+
+- `jira.enabled`;
+- `jira.url`;
+- `jira.projectKey`;
+- `jira.issueTypeName`;
+- `jira.search.jql`;
+- `jira.search.fields`;
+- `jira.search.maxResults/maxPages/timeoutMs/maxContextBytes`;
+- `jira.metadata.refreshIntervalMinutes`;
+- `jira.create.requireConfirmation`.
+
+`jira.search.fields` — единственный разрешённый набор полей существующих задач. Model/user input не может изменить URL, project/type, JQL или fields. Credential не входит в config file.
 
 ## Scope
 
-- Fixed-origin Jira read client и TLS/redirect/timeouts policy.
-- Compatibility/create metadata/options retrieval с actual credential.
-- Sanitized immutable snapshot hash/version/freshness.
-- Versioned semantic-to-Jira whitelist mapper и canonical payload/hash.
-- Required/optional fields, strict unknown reject, no assignee/reporter/transition/correlation.
-- Metadata-change circuit breaker/create disable state.
+### 1. Jira connector и startup discovery
+
+- fixed configured HTTPS origin;
+- token-authenticated REST client;
+- bounded timeouts/response sizes, redirect off;
+- resolve project key и issue-type name в runtime IDs;
+- retrieve create metadata, required fields, schemas, defaults/options и permissions;
+- immutable runtime metadata snapshot с hash/timestamp;
+- readiness `JIRA_UNAVAILABLE/JIRA_SEARCH_READY/JIRA_CREATE_READY`;
+- startup, manual и interval refresh;
+- Jira failure не повреждает Draft/RBAC и не роняет основной flow.
+
+### 2. Configured JQL search
+
+- выполнять exact configured JQL;
+- запрашивать только configured `search.fields` и необходимые identifiers;
+- применять bounds до model context;
+- pagination, rate limit и read circuit breaker;
+- partial/error result не равен «кандидатов нет»;
+- Jira text считать недоверенным content.
+
+### 3. Context и дедупликация
+
+- sanitized bounded candidate context;
+- structured result `DUPLICATE/RELATED/UNIQUE/UNCERTAIN`;
+- candidate keys, confidence, reason и recommended action;
+- привязка к exact Draft version, JQL/search-fields config version и metadata hash;
+- изменение входов инвалидирует решение;
+- Guest не получает Jira details;
+- `DUPLICATE/UNCERTAIN` не запускают create без пользовательского решения.
+
+### 4. Dynamic create form
+
+- project/type runtime IDs только из startup metadata;
+- summary/description из текущего Draft;
+- required Jira fields обнаруживаются динамически;
+- Jira default не переопределяется;
+- supported option/text/number/date fields превращаются в typed questions;
+- semantic answers разрешаются в field/option IDs только server-side;
+- unknown/unsupported/ambiguous required field блокирует create;
+- arbitrary model JSON запрещён.
+
+### 5. Preview и confirmation
+
+- bounded preview проекта, типа, summary, description и заполненных required fields;
+- confirmation привязано к actor/chat/Draft version/metadata hash/payload hash;
+- изменение данных делает confirmation stale;
+- default `requireConfirmation=true`.
+
+### 6. Create, idempotency и UNKNOWN
+
+- server-side canonical payload;
+- atomic unique operation для `draft_id + draft_version + payload_hash`;
+- один fixed Jira create POST;
+- concurrent/replayed triggers дают не более одного network call;
+- успех только по валидному Jira ID/key;
+- ambiguous/malformed response → `UNKNOWN`, без автоматического POST retry;
+- protected manual reconciliation;
+- Jira link только из configured URL + validated key.
 
 ## Вне scope
 
-Duplicate JQL/search, Jira POST, retries after POST, issue mutation и production create enablement.
+- несколько Jira origins/projects/issue types в одном deployment;
+- user/model-generated JQL или fields;
+- generic Jira HTTP tool;
+- Jira update/comment/transition;
+- автоматическое управление assignee/reporter;
+- embeddings/vector DB;
+- voice, PO notifications и production go-live operations;
+- hardcoded project/issue/field/option IDs.
 
-## Компоненты и файлы
+## Компоненты
 
-- `packages/idea-to-jira-plugin/src/jira/http-client.ts`, `metadata-client.ts`, `metadata-schema.ts`.
-- `packages/idea-to-jira-plugin/src/jira/metadata-snapshot-service.ts`, repositories.
-- `packages/idea-to-jira-plugin/src/jira/payload-mapper.ts`, `canonical-json.ts`, mapper versions.
-- Contract fixtures generated/sanitized from approved metadata, never private issue data.
-- `JIRA_CREATE_CONTRACT.md` update only if evidence changes normative mapping.
+- config schema/parser/startup validation;
+- `src/jira/http-client.ts`;
+- `src/jira/metadata-client.ts` и snapshot service;
+- `src/jira/search-client.ts` и bounded-context builder;
+- `src/duplicates/*`;
+- dynamic-field form/answer repository;
+- preview/confirmation service;
+- payload mapper/canonical JSON;
+- posting operation/idempotency/error classifier;
+- fake Jira integration fixtures;
+- migrations/repositories, если нужны новые durable states.
 
-## Атомарные инженерные задачи
+## Tests
 
-1. Зафиксировать production origin/auth scheme/path outside public docs; runtime config allows only one HTTPS origin.
-2. Implement GET-only transport method allowlist; redirects disabled/cross-origin forbidden; headers never logged.
-3. Verify Jira version, project `18100`/`FPF`, Feature `11500`, create permission and standard initial behavior evidence.
-4. Retrieve create metadata/options for required and selected optional fields with page/size/time bounds.
-5. Parse via strict schemas; unknown/malformed/oversized response fails closed.
-6. Store sanitized snapshot: schema shapes, option stable IDs, limits, timestamp, hash, Jira/contract/mapper versions; no issue contents/credential.
-7. Mark snapshot `VERIFIED/STALE/INVALID`; freshness policy config and alerts.
-8. Implement semantic required values → exact JSON shape for project, issuetype, summary, description and four custom fields.
-9. Optional route field appears only when active mapper allowlist + Catalog verified option + metadata permit; otherwise omitted or blocks per contract.
-10. Mapper rejects unknown keys, arbitrary JSON, field IDs, option labels without stable ID, placeholders/oversize.
-11. Omit assignee/reporter entirely; prohibit status/transition and any local correlation marker.
-12. Canonicalize object keys/semantically unordered arrays and compute payload hash; version rules explicit.
-13. Compare live snapshot hash to approved baseline; drift disables create until revalidation/contract tests.
-14. Separate read metadata scope from Jira issue search scope and future write scope in interfaces/credentials evidence.
-15. Keep `DisabledJiraIssueClient` as write implementation.
+1. Config принимает Jira URL, project key, issue-type name, JQL и field list; rejects unsafe/empty/unknown values.
+2. В production code/config нет numeric Jira project/type/custom-field constants.
+3. Startup discovery разрешает runtime IDs и строит readiness.
+4. Search request содержит exact configured JQL/fields и limits.
+5. Extra fields не читаются и не попадают в context.
+6. Bounded context устойчив к oversized/malicious Jira content.
+7. Dedup transitions/version invalidation работают детерминированно.
+8. Required fields/defaults/options строятся из metadata.
+9. Unsupported required field блокирует create и не делает POST.
+10. Preview/confirmation anti-replay и CAS.
+11. Concurrent/repeated event → one operation/one POST.
+12. Timeout may-have-sent/malformed success → UNKNOWN/no retry/no invented key.
+13. 401/403/429/5xx/timeout/redirect/malformed/oversize matrix.
+14. Credential/raw Jira bodies отсутствуют в Git/log/audit/SQLite business data.
+15. Regression suite Stages 01–05 остаётся зелёной.
 
-## Границы данных, состояний и интеграций
+## Acceptance criteria
 
-Metadata is authoritative for technical shapes/options, normative docs for business-required description/whitelist. GET issues do not prove create schema. Model/user supply semantic choices only, never field IDs/origin/path/method/JQL/header.
+- Deployment меняет Jira URL/project/type/JQL/search fields без изменения кода.
+- После restart integration заново получает актуальные Jira IDs/metadata.
+- Идея сравнивается только с bounded configured Jira context.
+- Пользователь получает понятное решение по дубликатам.
+- Любое required поле заполняется generic metadata-driven flow либо безопасно блокирует create.
+- Подтверждённая уникальная идея создаёт ровно одну Jira issue и возвращает реальный key/link.
+- Jira degradation оставляет Draft доступным.
+- Никаких hardcoded Jira IDs или model-controlled transport/payload.
 
-## Безопасность и надёжность
+## Delivery
 
-SSRF prevented by fixed origin/path builder. Redirect off. Bounded response parser. 401/403 alerts safe code and invalidate readiness. Metadata cache cannot silently outlive version/freshness policy. Canonical payload may be retained only according to data minimization; logs use hash/version, not body.
+Рекомендуется одна feature-ветка с последовательными reviewable commits либо PR stack:
 
-## Миграция, rollback и recovery
+1. config + connector + discovery;
+2. search + bounded context + dedup;
+3. dynamic fields + preview/confirmation;
+4. create + idempotency/UNKNOWN + integrated tests.
 
-New field/schema requires new contract/mapper version and fixtures. Existing Draft references semantic values; remapping stale metadata requires new readiness computation, not silent mutation. Rollback mapper uses matching approved snapshot version; mismatch disables create.
-
-## Тесты
-
-### Unit/contract
-
-- Exact eight required elements and JSON shape fixtures.
-- Allowed/invalid options, summary/description limits.
-- Omitted assignee/reporter, no status/transition/correlation.
-- Unknown field/arbitrary model JSON rejected.
-- Canonical hash stable and changes on material payload change.
-
-### Integration/security
-
-- Fake Jira metadata 200/malformed/oversize/401/403/429/5xx/timeout/redirect.
-- Fixed origin/path/method cannot be overridden.
-- Snapshot drift/stale → readiness/create gate false.
-- Sanitized fixture/log contains no credentials/private issue contents.
-
-## Проверяемые критерии приёмки
-
-1. Metadata snapshot has evidence timestamp/hash/version and exact field shapes.
-2. Mapper produces only contract whitelist from semantic Draft/Catalog values.
-3. Any unknown/stale/invalid field/option yields no POST-capable payload.
-4. No assignee/reporter/correlation/transition in serialized payload.
-5. Jira write client remains disabled and tests assert zero POST.
-
-## Exit criteria
-
-- O-002/O-003 закрыты evidence для production enablement либо явно остаются go-live blocker.
-- Versioned mapper/fixtures/metadata drift gate ready.
-- Duplicate stage gets safe read client base without transport authority expansion.
-- Create feature flag still false.
-
-## Трассируемость
-
-BR-004/007/009; FR-046, FR-060, FR-071/074/077; NFR-012—017, NFR-032, NFR-080/082/083, NFR-090—093/097; D-007, D-018—022; JC §2–12, JC-001—032, contract tests 1–8/18; O-002/O-003.
-
-## Риски, неизвестные и решения
-
-- **Blocker/evidence:** exact JSON shapes/options/limits and auth/path with production credential.
-- **Risk:** metadata endpoint availability/semantics differ in Jira Server 11.3.8; compatibility test must be authoritative.
-- **Assumption:** optional route fields default disabled.
-- **Contradiction guard:** read issue fields never substitute create metadata evidence.
+До отдельного explicit approval live Jira POST проверяется только fake transport. Read-only live probe допускается при наличии защищённого credential и без сохранения private issue contents.

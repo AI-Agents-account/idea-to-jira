@@ -1,5 +1,7 @@
 # 13. Jira create adapter и контролируемое включение
 
+> Обновление 2026-08-21: этот документ — supporting contract внутри [Stage-08 Jira MVP integration](08-jira-metadata-whitelist-mapper.md). При конфликте применяются Stage-08, `docs/JIRA_CREATE_CONTRACT.md` v2 и D-026—D-029; fixed Jira IDs/Catalog-first dependency не применяются.
+
 ## Цель и пользовательская ценность
 
 Подключить единственную разрешённую операцию записи — создание Feature в production Jira — так, чтобы запрос выполнялся только после атомарной проверки всех предусловий, а любой неоднозначный исход оставлял систему fail closed. Creator получает реальный key/link без риска скрытого повторного POST.
@@ -38,7 +40,7 @@ HTTP POST нельзя добавлять раньше, чем готовы RBAC
 1. Удалить возможность принимать origin, method, path, project/type, fields, headers или credential из tool/model/user input.
 2. Прочитать Jira credential только из runtime SecretRef; валидировать presence, но никогда не сохранять value в SQLite/log/audit.
 3. Зафиксировать allowlisted origin и endpoint; запретить cross-origin redirect, arbitrary proxy и неожиданный response content type.
-4. На startup сверить Jira Server compatibility, project `18100`/`FPF`, Feature `11500`, metadata/options hash, mapper/contract version, permission scope и route readiness.
+4. На startup сверить Jira Server compatibility, configured project/type selectors, runtime metadata hash, mapper/contract version, permission scope и readiness.
 5. Оставлять gate `DISABLED` при missing/stale evidence, migration/recovery error, audit failure, absent reconciliation authority или unknown config key.
 6. Перед network call повторно проверить trusted actor/owner, активного Creator, exact Draft version, Catalog/metadata/duplicate proof, payload hash и claimed operation.
 7. Передавать adapter только immutable canonical payload; повторная сериализация должна давать тот же hash.

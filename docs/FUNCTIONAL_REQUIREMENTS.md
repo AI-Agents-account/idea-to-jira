@@ -1,5 +1,8 @@
 # Функциональные требования: Idea-to-Jira MVP
 
+> Обновление 2026-08-21: Jira flow следует D-026—D-029 и `JIRA_CREATE_CONTRACT.md` v2. Конфигурация задаёт URL/project/type/JQL/search fields; runtime metadata определяет IDs/required fields; preview/confirmation обязательны. Противоречащие прежние FR считаются superseded до полной перенумерации.
+
+
 **Статус:** актуальная базовая версия для MVP
 **Версия:** 1.0
 **Дата:** 2026-08-20
