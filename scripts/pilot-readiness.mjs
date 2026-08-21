@@ -12,6 +12,11 @@ const expectedTools = [
   "idea_to_jira_read_draft",
   "idea_to_jira_patch_draft",
   "idea_to_jira_cancel_draft",
+  "idea_to_jira_search_duplicates",
+  "idea_to_jira_answer_field",
+  "idea_to_jira_preview_issue",
+  "idea_to_jira_confirm_issue",
+  "idea_to_jira_create_issue",
   "idea_to_jira_request_access",
 ];
 
