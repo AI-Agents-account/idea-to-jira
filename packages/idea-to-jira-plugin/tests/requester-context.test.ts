@@ -22,13 +22,18 @@ const validFacts = {
   chatId: "123456789",
 };
 
-test("accepts only a host-derived Telegram DM context", () => {
+test("accepts any numeric host-derived Telegram private-DM context", () => {
   const result = validateRequesterFacts(validFacts, config);
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.context.senderId, "123456789");
     assert.equal(Object.isFrozen(result.context), true);
   }
+  assert.equal(validateRequesterFacts({
+    ...validFacts,
+    senderId: "987654321",
+    chatId: "987654321",
+  }, config).ok, true);
 });
 
 test("denies missing or ambiguous sender and non-DM destinations", () => {
@@ -40,10 +45,6 @@ test("denies missing or ambiguous sender and non-DM destinations", () => {
   assert.deepEqual(validateRequesterFacts({ ...validFacts, senderId: "telegram:123456789" }, config), {
     ok: false,
     code: "SENDER_MISSING",
-  });
-  assert.deepEqual(validateRequesterFacts({ ...validFacts, senderId: "987654321", chatId: "987654321" }, config), {
-    ok: false,
-    code: "SENDER_DENIED",
   });
   assert.deepEqual(validateRequesterFacts({ ...validFacts, chatId: "-100123456789" }, config), {
     ok: false,

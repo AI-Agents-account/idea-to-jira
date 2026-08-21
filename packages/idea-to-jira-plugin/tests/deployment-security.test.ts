@@ -35,9 +35,15 @@ test("manifest and host config expose only typed Draft/access/Jira workflow tool
   assert.match(pluginSource, /decision\.allowed && decision\.via === "ACTIVE_CREATOR"/);
   assert.match(pluginSource, /questionId: text\(128\)/);
   assert.doesNotMatch(pluginSource, /fieldId: text\(128\)/);
-  assert.match(openclawConfig, /dmPolicy: "allowlist"/);
-  assert.match(openclawConfig, /allowFrom: \["\$\{TELEGRAM_PILOT_SENDER_ID\}"\]/);
-  assert.doesNotMatch(openclawConfig, /dmPolicy: "open"|allowFrom: \["\*"\]/);
+  assert.equal((openclawConfig.match(/dmPolicy: "open"/g) ?? []).length, 2);
+  assert.equal((openclawConfig.match(/allowFrom: \["\*"\]/g) ?? []).length, 2);
+  assert.equal((openclawConfig.match(/groupPolicy: "disabled"/g) ?? []).length, 2);
+  assert.match(openclawConfig, /commands:\s*\{[\s\S]*?native: false,[\s\S]*?nativeSkills: false,[\s\S]*?text: false,/);
+  assert.match(openclawConfig, /allowFrom:\s*\{\s*telegram: \["\$\{TELEGRAM_PILOT_SENDER_ID\}"\]/);
+  assert.match(openclawConfig, /ownerAllowFrom: \["telegram:\$\{TELEGRAM_PILOT_SENDER_ID\}"\]/);
+  for (const disabled of ["bash", "config", "mcp", "plugins", "debug", "restart"]) {
+    assert.match(openclawConfig, new RegExp(`${disabled}: false`));
+  }
   assert.match(openclawConfig, /audio: \{ enabled: false \}/);
   assert.match(openclawConfig, /defaultAccount: "default"/);
   assert.match(openclawConfig, /accounts:\s*\{\s*default:\s*\{/);

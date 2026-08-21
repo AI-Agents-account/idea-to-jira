@@ -36,7 +36,6 @@ test("builds one immutable effective configuration from config and protected env
     "idea_to_jira_request_access",
   ]);
   assert.equal(result.config.limits.activeDrafts, 3);
-  assert.equal(result.config.telegram.pilotSenderId, "123456789");
   assert.deepEqual(result.config.telegram.adminSenderIds, ["123456789", "987654321"]);
   assert.deepEqual(result.config.notifications.productOwnerSenderIds, ["111222333"]);
   assert.equal(Object.isFrozen(result.config), true);
@@ -44,7 +43,7 @@ test("builds one immutable effective configuration from config and protected env
 });
 
 test("fails closed when a protected runtime value is missing", () => {
-  const result = load(validRawConfig(), { ...validEnvironment, TELEGRAM_PILOT_SENDER_ID: "" });
+  const result = load(validRawConfig(), { ...validEnvironment, BUSINESS_ADMIN_TELEGRAM_IDS: "" });
   assert.deepEqual(result, { ok: false, code: "SECRET_REF_MISSING" });
 });
 
@@ -64,9 +63,9 @@ test("rejects unknown config keys and protected environment reference drift", ()
   (unknownNested.limits as Record<string, unknown>).unexpected = 1;
   assert.deepEqual(load(unknownNested), { ok: false, code: "CONFIG_INVALID" });
 
-  const driftedPilotReference = validRawConfig();
-  (driftedPilotReference.telegram as Record<string, unknown>).pilotSenderIdEnv = "UNRELATED_ACTOR";
-  assert.deepEqual(load(driftedPilotReference), { ok: false, code: "CONFIG_INVALID" });
+  const driftedAdminReference = validRawConfig();
+  (driftedAdminReference.telegram as Record<string, unknown>).adminSenderIdsEnv = "UNRELATED_ACTOR";
+  assert.deepEqual(load(driftedAdminReference), { ok: false, code: "CONFIG_INVALID" });
 });
 
 test("rejects non-HTTPS or path-bearing Jira origins", () => {
@@ -97,16 +96,12 @@ test("accepts deployment Jira scope and rejects an unsafe confirmation gate/tool
 
 test("rejects invalid admin IDs and catalog checksum/content", () => {
   assert.deepEqual(
-    load(validRawConfig(), { ...validEnvironment, TELEGRAM_PILOT_SENDER_ID: "@pilot" }),
-    { ok: false, code: "SECRET_REF_MISSING" },
-  );
-  assert.deepEqual(
     load(validRawConfig(), { ...validEnvironment, BUSINESS_ADMIN_TELEGRAM_IDS: "@admin" }),
     { ok: false, code: "SECRET_REF_MISSING" },
   );
-  assert.deepEqual(
-    load(validRawConfig(), { ...validEnvironment, BUSINESS_ADMIN_TELEGRAM_IDS: "987654321" }),
-    { ok: false, code: "CONFIG_INVALID" },
+  assert.equal(
+    load(validRawConfig(), { ...validEnvironment, BUSINESS_ADMIN_TELEGRAM_IDS: "987654321" }).ok,
+    true,
   );
   assert.deepEqual(
     load(validRawConfig(), { ...validEnvironment, PRODUCT_OWNER_TELEGRAM_IDS: "" }),

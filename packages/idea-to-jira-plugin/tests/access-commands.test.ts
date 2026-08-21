@@ -12,6 +12,7 @@ import type {
 import { AccessService } from "../src/access/access-service.js";
 import { registerAccessCommands } from "../src/access/commands.js";
 import { SafeError } from "../src/errors/index.js";
+import { TokenBucketRateLimiter } from "../src/runtime/policy.js";
 import type { ServiceRuntimeStatus } from "../src/runtime/service-runtime.js";
 import { ensurePrivateStateDirectory } from "../src/runtime/state.js";
 import { openPluginDatabase } from "../src/storage/database.js";
@@ -62,8 +63,8 @@ test("typed command boundary uses trusted context and fixed admin destinations",
   ensurePrivateStateDirectory(stateDir);
   const storage = openPluginDatabase({ stateDir });
   const config = effectiveConfig();
-  let activeConfig = config;
   const service = new AccessService({ unitOfWork: storage.repositories, config });
+  const limiter = new TokenBucketRateLimiter(config.limits);
   const commands = new Map<string, OpenClawPluginCommandDefinition>();
   const sends: Array<{ to: string; accountId?: string | null; text: string }> = [];
   const diagnostics: string[] = [];
@@ -92,7 +93,7 @@ test("typed command boundary uses trusted context and fixed admin destinations",
       commands.set(command.name, command);
     },
   } as unknown as OpenClawPluginApi;
-  registerAccessCommands(api, config, () => ({ config: activeConfig, service }), runtimeStatus);
+  registerAccessCommands(api, config, () => ({ config, service, limiter }), runtimeStatus);
 
   const requestCommand = commands.get("request_access");
   const accessCommand = commands.get("access");
@@ -101,7 +102,8 @@ test("typed command boundary uses trusted context and fixed admin destinations",
   assert.equal(requestCommand.requireAuth, false);
   assert.equal(accessCommand.requireAuth, false);
 
-  const requested = await requestCommand.handler(commandContext("123456789"));
+  const publicSenderId = "222222222";
+  const requested = await requestCommand.handler(commandContext(publicSenderId));
   assert.equal(text(requested), "Access request submitted. Business Admins were notified.");
   assert.deepEqual(sends.map((send) => send.to), config.telegram.adminSenderIds);
   assert.equal(sends.every((send) => send.accountId === "default"), true);
@@ -109,17 +111,25 @@ test("typed command boundary uses trusted context and fixed admin destinations",
   const actionRef = /Action reference: ([A-Za-z0-9_-]{20,64})/.exec(sends[0]?.text ?? "")?.[1];
   assert.ok(actionRef);
 
+  const repeated = await requestCommand.handler(commandContext(publicSenderId));
+  assert.match(text(repeated), /^Current access status:\nAccess state: PENDING/m);
+  assert.equal(sends.length, config.telegram.adminSenderIds.length);
+
+  assert.equal(
+    text(await accessCommand.handler(commandContext("333333333", "status"))),
+    "Чтобы запросить доступ, отправьте команду /request_access.",
+  );
   const forged = await accessCommand.handler(commandContext(
     "333333333",
     `approve ${actionRef} 1 123456789`,
   ));
-  assert.equal(text(forged), "This request is unavailable.");
+  assert.equal(text(forged), "Чтобы запросить доступ, отправьте команду /request_access.");
   assert.equal(service.getStatus({
     agentId: "idea-mvp",
     channelId: "telegram",
     accountId: "default",
-    senderId: "123456789",
-    chatId: "123456789",
+    senderId: publicSenderId,
+    chatId: publicSenderId,
   }).userState, "PENDING");
 
   const substitutedDestination = await accessCommand.handler(commandContext(
@@ -129,7 +139,6 @@ test("typed command boundary uses trusted context and fixed admin destinations",
   ));
   assert.equal(text(substitutedDestination), "This request is unavailable.");
   assert.deepEqual(diagnostics, [
-    "idea-to-jira access command=access action=requester_validation code=SENDER_DENIED",
     "idea-to-jira access command=access action=requester_validation code=DESTINATION_DENIED",
   ]);
 
@@ -146,20 +155,16 @@ test("typed command boundary uses trusted context and fixed admin destinations",
   ));
   assert.equal(text(replay), "The action is stale or was already completed. Refresh status before retrying.");
   assert.deepEqual(diagnostics, [
-    "idea-to-jira access command=access action=requester_validation code=SENDER_DENIED",
     "idea-to-jira access command=access action=requester_validation code=DESTINATION_DENIED",
     "idea-to-jira access command=access action=safe_failure code=ACCESS_REQUEST_STALE",
   ]);
   for (const sensitiveValue of ["333333333", "123456789", "222222222", actionRef]) {
     assert.equal(diagnostics.some((entry) => entry.includes(sensitiveValue)), false);
   }
-  activeConfig = Object.freeze({
-    ...config,
-    telegram: Object.freeze({ ...config.telegram, pilotSenderId: "444444444" }),
-  });
-  assert.equal(text(await requestCommand.handler(commandContext("123456789"))), "This request is unavailable.");
-  assert.equal(diagnostics.at(-1),
-    "idea-to-jira access command=request_access action=requester_validation code=SENDER_DENIED");
+  assert.match(
+    text(await requestCommand.handler(commandContext(publicSenderId))),
+    /^Current access status:\nAccess state: CREATOR/m,
+  );
   storage.close();
 });
 
@@ -178,10 +183,11 @@ test("command diagnostics distinguish requester rejection from storage readiness
     },
   } as unknown as OpenClawPluginApi;
   let service: AccessService | undefined;
+  const limiter = new TokenBucketRateLimiter(config.limits);
   registerAccessCommands(
     api,
     config,
-    () => service ? { config, service } : undefined,
+    () => service ? { config, service, limiter } : undefined,
     () => runtimeStatus({
       generation: 2,
       latestGeneration: 2,
@@ -195,7 +201,7 @@ test("command diagnostics distinguish requester rejection from storage readiness
   assert.ok(requestCommand);
   assert.ok(accessCommand);
 
-  const suppliedSenderId = "987654321";
+  const suppliedSenderId = "telegram:987654321";
   const suppliedReference = "PRIVATE_REFERENCE_123456789";
   const suppliedToken = "private-token-and-reason";
   const suppliedArgs = `approve ${suppliedReference} 7 ${suppliedToken}`;
@@ -232,15 +238,15 @@ test("command diagnostics distinguish requester rejection from storage readiness
   );
 
   assert.deepEqual(diagnostics, [
-    "idea-to-jira access command=request_access action=requester_validation code=SENDER_DENIED",
+    "idea-to-jira access command=request_access action=requester_validation code=SENDER_MISSING",
     "idea-to-jira access command=request_access action=safe_failure code=STORAGE_NOT_READY runtime_phase=STARTING runtime_generation=2 latest_generation=2 runtime_instance=present",
-    "idea-to-jira access command=access action=requester_validation code=SENDER_DENIED",
+    "idea-to-jira access command=access action=requester_validation code=SENDER_MISSING",
     "idea-to-jira access command=access action=safe_failure code=STORAGE_NOT_READY runtime_phase=STARTING runtime_generation=2 latest_generation=2 runtime_instance=present",
     "idea-to-jira access command=request_access action=safe_failure code=ACCESS_REQUEST_CONFLICT",
     "idea-to-jira access command=access action=safe_failure code=INTERNAL_ERROR",
   ]);
   assert.equal(diagnostics.every((entry) =>
-    /^idea-to-jira access command=(?:access|request_access) action=(?:requester_validation|safe_failure) code=(?:SENDER_DENIED|ACCESS_REQUEST_CONFLICT|INTERNAL_ERROR)$/.test(entry) ||
+    /^idea-to-jira access command=(?:access|request_access) action=(?:requester_validation|safe_failure) code=(?:SENDER_MISSING|ACCESS_REQUEST_CONFLICT|INTERNAL_ERROR)$/.test(entry) ||
     /^idea-to-jira access command=(?:access|request_access) action=safe_failure code=STORAGE_NOT_READY runtime_phase=STARTING runtime_generation=2 latest_generation=2 runtime_instance=present$/.test(entry)), true);
   for (const sensitiveValue of [
     suppliedSenderId,
@@ -254,4 +260,50 @@ test("command diagnostics distinguish requester rejection from storage readiness
   ]) {
     assert.equal(diagnostics.some((entry) => entry.includes(sensitiveValue)), false);
   }
+});
+
+test("public request command is rate-limited before access storage", async () => {
+  const config = effectiveConfig();
+  const commands = new Map<string, OpenClawPluginCommandDefinition>();
+  const diagnostics: string[] = [];
+  let storageCalled = false;
+  const api = {
+    logger: { warn(message: string) { diagnostics.push(message); } },
+    registerCommand(command: OpenClawPluginCommandDefinition) {
+      commands.set(command.name, command);
+    },
+  } as unknown as OpenClawPluginApi;
+  const service = {
+    requestAccess() {
+      storageCalled = true;
+      throw new Error("must not reach storage");
+    },
+  } as unknown as AccessService;
+  registerAccessCommands(
+    api,
+    config,
+    () => ({
+      config,
+      service,
+      limiter: {
+        consume(requester, operation) {
+          assert.equal(requester.senderId, "222222222");
+          assert.equal(operation, "access_request");
+          return { allowed: false, retryAfterMs: 1_000 };
+        },
+      },
+    }),
+    runtimeStatus,
+  );
+
+  const requestCommand = commands.get("request_access");
+  assert.ok(requestCommand);
+  assert.equal(
+    text(await requestCommand.handler(commandContext("222222222"))),
+    "Слишком много запросов. Повторите команду /request_access позже.",
+  );
+  assert.equal(storageCalled, false);
+  assert.deepEqual(diagnostics, [
+    "idea-to-jira access command=request_access action=safe_failure code=RATE_LIMITED",
+  ]);
 });

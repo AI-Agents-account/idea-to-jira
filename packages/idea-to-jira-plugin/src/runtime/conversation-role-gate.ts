@@ -7,9 +7,9 @@ import type { EffectiveConfig } from "../config.js";
 import type { TrustedRequesterContext } from "./requester-context.js";
 
 export const CONVERSATION_ROLE_REPLIES = Object.freeze({
-  GUEST: "У вас пока нет роли Creator. Отправьте запрос на доступ.",
-  PENDING: "Запрос на роль Creator уже отправлен и ожидает решения.",
-  SUSPENDED: "Роль Creator временно приостановлена.",
+  GUEST: "У вас пока нет роли Creator. Чтобы запросить доступ, отправьте команду /request_access.",
+  PENDING: "Запрос на роль Creator уже отправлен и ожидает решения. Команда /request_access покажет текущий статус.",
+  SUSPENDED: "Роль Creator временно приостановлена. Команда /request_access покажет текущий статус.",
   BLOCKED: "Доступ к сервису ограничен.",
   UNAVAILABLE: "Не удалось проверить доступ. Попробуйте позже.",
 });

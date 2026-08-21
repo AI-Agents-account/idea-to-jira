@@ -1,7 +1,7 @@
 import type { EffectiveConfig } from "../config.js";
 import type { TrustedRequesterContext } from "./requester-context.js";
 
-export type PolicyOperation = "model_run" | "draft_tool";
+export type PolicyOperation = "model_run" | "draft_tool" | "access_request";
 
 export interface RateLimitDecision {
   readonly allowed: boolean;

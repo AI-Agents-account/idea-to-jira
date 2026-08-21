@@ -31,17 +31,19 @@ Idea-to-Jira — выделенный Telegram-ассистент, которы�
 
 | Область | Реализовано в scaffold | Целевой MVP |
 | --- | --- | --- |
-| OpenClaw plugin | Startup config validation, `before_agent_run`/tool-context gates и пять узких Draft/access tools | Дополнительные узкие Catalog/duplicate/posting lifecycle surfaces |
+| OpenClaw plugin | Startup config validation, public typed access request, `before_agent_run`/tool-context gates и десять узких Draft/access/Jira lifecycle tools | Live Catalog/metadata proof и production posting surfaces |
 | Draft | Schema v1, per-field provenance, immutable versions, CAS, owner isolation, active limit, JC-004 formatter и pure readiness в SQLite | Диалоговая orchestration, live proof integrations и retention execution |
 | Jira | Fail-closed adapter: write всегда запрещён | Bounded duplicate search, whitelist mapper, POST и manual reconciliation |
-| Доступ | Channel/account/agent/user-trigger/DM/destination fail-closed gate; controlled pilot дополнительно требует exact protected sender в OpenClaw allowlist и plugin runtime; Guest/Creator/Business Admin lifecycle, CAS/anti-replay; own-Draft predicate используется каждым Draft tool | Active-Creator guard перед duplicate disclosure/claim/POST |
-| Stage-05A pilot | Один Telegram DM sender, text-only operational scope, audio understanding disabled, local readiness, Jira credential/transport отсутствуют | Не является production/broad-beta gate; full lifecycle и voice deferred |
+| Доступ | Public numeric private-DM ingress; typed `/request_access` без модели; channel/account/agent/user-trigger/destination/thread fail-closed validation; Guest pre-model block; Creator/Business Admin lifecycle, CAS/anti-replay; native/text core-command surfaces выключены, remaining directive/owner authorization только controlled operator | Production onboarding/operations policy |
+| Stage-05A pilot | Public request boundary с отдельным controlled operator, text-only operational scope, audio understanding disabled, local readiness | Не является unrestricted model beta/production gate; voice deferred |
 | Knowledge Catalog | Неполная Markdown-заготовка | Версионированный, проверяемый и fail-closed каталог маршрутизации |
 | Voice | Не реализован | Локальный Whisper `medium`, показ и коррекция транскрипта |
 | Уведомления | Не реализованы | Идемпотентная доставка автору, Business Admin и Product Owner |
 | Наблюдаемость | Раздельные liveness/create-readiness signals и санитаризированные security audit codes | Structured logs, metrics, alerts, audit export и runbooks |
 
-Подтверждённый контракт закреплённой версии OpenClaw `2026.7.1-2`: `before_agent_run` передаёт host-derived `accountId`, `channelId`, `senderId`, а hook context — `agentId`, `trigger` и `chatId`; tool factory получает `agentId`, `messageChannel`, `agentAccountId`, `requesterSenderId` и `deliveryContext`. Параметры tool и текст модели не являются источником identity. Отсутствие любого обязательного поля, non-user trigger, thread/group route или несовпадение DM destination с sender приводит к отказу; эти варианты закреплены unit-тестами.
+Подтверждённый контракт закреплённой версии OpenClaw `2026.7.1-2`: `before_agent_run` передаёт host-derived `accountId`, `channelId`, `senderId`, а hook context — `agentId`, `trigger` и `chatId`; tool factory получает `agentId`, `messageChannel`, `agentAccountId`, `requesterSenderId` и `deliveryContext`. Параметры tool и текст модели не являются источником identity. Любой numeric sender допускается только в private DM; отсутствие обязательного поля, non-user trigger, thread/group route или несовпадение DM destination с sender приводит к отказу. Exact pilot sender не является plugin authorization rule.
+
+OpenClaw transport использует `dmPolicy: "open"` и `allowFrom: ["*"]` на Telegram channel и canonical account при `groupPolicy: "disabled"`. Это открывает только вход в прикладной access gate. Публичный `/request_access` зарегистрирован как typed plugin command с `requireAuth: false`; Guest free-form останавливает `before_agent_run`, а все tools скрыты/отклонены до server-side role admission. Native и text core-command parsing, native skill menus и опасные command surfaces выключены; отдельные `commands.allowFrom`/`ownerAllowFrom` ограничивают remaining directive/owner authorization controlled operator identity.
 
 Для Stage-05A установленный config API подтверждает `tools.media.audio.enabled: false`, но typed `before_agent_run` event не предоставляет attachment/media discriminator. Поэтому архитектура не выдумывает pre-model media hook: pilot допускает только текст по operational policy, а byte-level media rejection остаётся blocker до подтверждённого SDK boundary. Это не включает Stage-07 voice.
 
@@ -120,7 +122,7 @@ flowchart TB
 
 ### 5.1. OpenClaw Gateway и агент
 
-OpenClaw отвечает за Telegram-сессию, модельный диалог, загрузку плагина, вызов tools и runtime auth profiles. Конфигурация создаёт отдельного агента, peer-scoped DM sessions и explicit allowlist инструментов.
+OpenClaw отвечает за Telegram-сессию, модельный диалог, загрузку плагина, вызов tools и runtime auth profiles. Конфигурация создаёт отдельного агента, peer-scoped DM sessions, public private-DM ingress и explicit allowlist инструментов. Transport admission не запускает модель: plugin role gate допускает модель и tools только для active Creator или non-blocked Business Admin.
 
 Агент может:
 
@@ -187,7 +189,7 @@ Jira adapter допускает только URL, project key, issue-type name, 
 
 | Роль | Может | Не может |
 | --- | --- | --- |
-| **Guest** | Вести собственный диалог, сохранять Draft, исправлять транскрипт, запросить доступ | Видеть детали Jira-дублей, подтверждать duplicate decision, создавать Jira issue |
+| **Guest** | Выполнить typed `/request_access` и повторно получить текущий статус без модели | Вести free-form модельный диалог, видеть/вызывать Draft или Jira tools, выполнять core commands/directives |
 | **Creator** | Всё доступное Guest; видеть разрешённые кандидаты, принять решение о дубле, запустить целевой READY-flow | Менять server-side mapping, проект/type, выдавать роли, повторять `UNKNOWN` POST |
 | **Business Admin** | Одобрить/отклонить access request, выдать/отозвать Creator по точному sender ID, видеть санитаризированный аудит решений | Получать host/OpenClaw owner access, читать секреты или полный произвольный пользовательский контент |
 | **Product Owner** | Получить уведомление о подтверждённой Jira-задаче и продолжить работу в Jira | Управлять приложением через уведомление, если отдельно не назначена административная роль |
@@ -198,7 +200,7 @@ Jira adapter допускает только URL, project key, issue-type name, 
 
 | Операция | Guest | Creator | Business Admin | Technical Owner |
 | --- | :---: | :---: | :---: | :---: |
-| Создать/редактировать свой Draft | ✓ | ✓ | Только как обычный пользователь | Диагностика по runbook |
+| Создать/редактировать свой Draft | — | ✓ | Только после server-side conversation admission | Диагностика по runbook |
 | Запросить Creator | ✓ | — | Просмотр решения | Диагностика |
 | Grant/revoke Creator | — | — | ✓ | Только аварийная процедура с аудитом |
 | Получить детали дублей | — | ✓ | Только санитаризированный аудит | Диагностика |
@@ -214,7 +216,7 @@ Jira adapter допускает только URL, project key, issue-type name, 
 
 ```mermaid
 sequenceDiagram
-    actor U as Guest/Creator
+    actor U as Active Creator
     participant T as Telegram
     participant A as OpenClaw agent
     participant W as Whisper medium
@@ -258,7 +260,7 @@ sequenceDiagram
     participant D as SQLite
     actor BA as Business Admin
 
-    G->>P: Запросить Creator
+    G->>P: Typed /request_access (без модели)
     P->>D: Atomic create active access request
     P-->>BA: Уведомление с sender ID и безопасным контекстом
     BA->>P: Approve/deny callback или команда

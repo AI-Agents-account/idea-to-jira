@@ -23,7 +23,6 @@ function config(adminSenderIds: readonly string[] = []): EffectiveConfig {
     telegram: {
       channelId: "telegram",
       accountId: "default",
-      pilotSenderId: requester.senderId,
       adminSenderIds,
     },
   } as EffectiveConfig;

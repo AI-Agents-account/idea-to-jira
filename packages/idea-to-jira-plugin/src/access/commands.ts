@@ -5,11 +5,13 @@ import type {
 } from "openclaw/plugin-sdk/plugin-entry";
 
 import type { EffectiveConfig } from "../config.js";
+import { authorizeBusinessAdmin } from "../auth/authorization.js";
 import { normalizeSafeError, SafeError, type SafeErrorCode } from "../errors/index.js";
 import {
   requesterFromCommandContext,
   type RequesterContextErrorCode,
 } from "../runtime/requester-context.js";
+import type { RateLimiter } from "../runtime/policy.js";
 import type { ServiceRuntimeStatus } from "../runtime/service-runtime.js";
 import {
   AccessService,
@@ -25,6 +27,7 @@ type AccessDiagnosticAction = "requester_validation" | "safe_failure";
 interface AccessCommandRuntime {
   readonly config: EffectiveConfig;
   readonly service: AccessService;
+  readonly limiter: RateLimiter;
 }
 
 function logAccessDiagnostic(
@@ -61,6 +64,9 @@ function safeFailure(error: unknown): PluginCommandResult {
   }
   if (error instanceof SafeError && error.code === "ROLE_STATE_INVALID") {
     return reply("The role transition is not valid in the current state.");
+  }
+  if (error instanceof SafeError && error.code === "RATE_LIMITED") {
+    return reply("Слишком много запросов. Повторите команду /request_access позже.");
   }
   return reply("This request is unavailable.");
 }
@@ -184,7 +190,11 @@ export function registerAccessCommands(
           logAccessDiagnostic(api, "request_access", "requester_validation", requester.code);
           return reply("This request is unavailable.");
         }
-        const result = requiredRuntime(resolved).service.requestAccess(requester.context);
+        const runtime = requiredRuntime(resolved);
+        if (!runtime.limiter.consume(requester.context, "access_request").allowed) {
+          throw new SafeError("RATE_LIMITED", true);
+        }
+        const result = runtime.service.requestAccess(requester.context);
         if (result.created && result.adminCard) {
           try {
             await notifyAdmins(api, context, config, renderAdminAccessCard(result.adminCard));
@@ -193,7 +203,7 @@ export function registerAccessCommands(
             return reply("Access request submitted. Admin notification delivery is unavailable.");
           }
         }
-        return reply(`Access request already exists.\n${formatStatus(result.status)}`);
+        return reply(`Current access status:\n${formatStatus(result.status)}`);
       } catch (error) {
         const code = normalizeSafeError(error).code;
         logAccessDiagnostic(
@@ -210,7 +220,7 @@ export function registerAccessCommands(
 
   api.registerCommand({
     name: "access",
-    description: "Show access status or perform an allowlisted Business Admin transition.",
+    description: "Perform a Business Admin access transition.",
     channels: [registrationConfig.telegram.channelId],
     acceptsArgs: true,
     requireAuth: false,
@@ -222,6 +232,9 @@ export function registerAccessCommands(
         if (!requester.ok) {
           logAccessDiagnostic(api, "access", "requester_validation", requester.code);
           return reply("This request is unavailable.");
+        }
+        if (!authorizeBusinessAdmin(requester.context, config).allowed) {
+          return reply("Чтобы запросить доступ, отправьте команду /request_access.");
         }
         const service = requiredRuntime(resolved).service;
         const parsed = parseActionArgs(context.args);

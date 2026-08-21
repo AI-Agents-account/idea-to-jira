@@ -42,7 +42,6 @@ export interface EffectiveConfig {
   readonly telegram: {
     readonly channelId: "telegram";
     readonly accountId: "default";
-    readonly pilotSenderId: string;
     readonly adminSenderIds: readonly string[];
   };
   readonly notifications: { readonly productOwnerSenderIds: readonly string[] };
@@ -75,7 +74,7 @@ export type ReadTextFile = (path: string) => string;
 type JsonObject = Record<string, unknown>;
 
 const ROOT_KEYS = ["agentId", "telegram", "notifications", "jira", "catalog", "sttModel", "allowedTools", "limits", "retention", "stateDir"] as const;
-const TELEGRAM_KEYS = ["channelId", "accountId", "pilotSenderIdEnv", "adminSenderIdsEnv"] as const;
+const TELEGRAM_KEYS = ["channelId", "accountId", "adminSenderIdsEnv"] as const;
 const NOTIFICATION_KEYS = ["productOwnerSenderIdsEnv"] as const;
 const JIRA_KEYS = ["enabled", "url", "projectKey", "issueTypeName", "search", "metadata", "create"] as const;
 const SEARCH_KEYS = ["jql", "fields", "maxResults", "maxPages", "timeoutMs", "maxContextBytes"] as const;
@@ -151,11 +150,10 @@ export function loadEffectiveConfig(
 
   const allowedTools = root.allowedTools;
   if (!Array.isArray(allowedTools) || allowedTools.length !== IDEA_TO_JIRA_TOOLS.length || allowedTools.some((tool, index) => tool !== IDEA_TO_JIRA_TOOLS[index])) return { ok: false, code: "TOOL_ALLOWLIST_INVALID" };
-  const pilotSenderIdEnv = string(telegram.pilotSenderIdEnv); const adminsEnv = string(telegram.adminSenderIdsEnv); const productOwnerRoutesEnv = string(notifications.productOwnerSenderIdsEnv);
-  if (pilotSenderIdEnv !== "TELEGRAM_PILOT_SENDER_ID" || adminsEnv !== "BUSINESS_ADMIN_TELEGRAM_IDS" || productOwnerRoutesEnv !== "PRODUCT_OWNER_TELEGRAM_IDS") return { ok: false, code: "CONFIG_INVALID" };
-  const pilotSenderId = string(environment[pilotSenderIdEnv]); const adminSenderIds = parseTelegramIds(environment[adminsEnv]); const productOwnerSenderIds = parseTelegramIds(environment[productOwnerRoutesEnv]);
-  if (!pilotSenderId || !numericTelegramId(pilotSenderId) || !adminSenderIds || !productOwnerSenderIds) return { ok: false, code: "SECRET_REF_MISSING" };
-  if (!adminSenderIds.includes(pilotSenderId)) return { ok: false, code: "CONFIG_INVALID" };
+  const adminsEnv = string(telegram.adminSenderIdsEnv); const productOwnerRoutesEnv = string(notifications.productOwnerSenderIdsEnv);
+  if (adminsEnv !== "BUSINESS_ADMIN_TELEGRAM_IDS" || productOwnerRoutesEnv !== "PRODUCT_OWNER_TELEGRAM_IDS") return { ok: false, code: "CONFIG_INVALID" };
+  const adminSenderIds = parseTelegramIds(environment[adminsEnv]); const productOwnerSenderIds = parseTelegramIds(environment[productOwnerRoutesEnv]);
+  if (!adminSenderIds || !productOwnerSenderIds) return { ok: false, code: "SECRET_REF_MISSING" };
 
   const catalogPath = string(catalog.path); const catalogSha256 = string(catalog.sha256)?.toLowerCase();
   if (!catalogPath || catalog.schemaVersion !== 1 || !catalogSha256 || !/^[a-f0-9]{64}$/.test(catalogSha256)) return { ok: false, code: "CATALOG_INVALID" };
@@ -169,7 +167,7 @@ export function loadEffectiveConfig(
 
   const config: EffectiveConfig = {
     agentId: "idea-mvp",
-    telegram: Object.freeze({ channelId: "telegram", accountId: "default", pilotSenderId, adminSenderIds }),
+    telegram: Object.freeze({ channelId: "telegram", accountId: "default", adminSenderIds }),
     notifications: Object.freeze({ productOwnerSenderIds }),
     jira: Object.freeze({
       enabled: jira.enabled, url, origin: url, projectKey, issueTypeName,

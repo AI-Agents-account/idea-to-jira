@@ -11,7 +11,6 @@ export function validRawConfig(): Record<string, unknown> {
     telegram: {
       channelId: "telegram",
       accountId: "default",
-      pilotSenderIdEnv: "TELEGRAM_PILOT_SENDER_ID",
       adminSenderIdsEnv: "BUSINESS_ADMIN_TELEGRAM_IDS",
     },
     notifications: {
@@ -58,6 +57,7 @@ export function validRawConfig(): Record<string, unknown> {
 }
 
 export const validEnvironment = {
+  // Used by deployment/readiness fixtures, not by plugin requester authorization.
   TELEGRAM_PILOT_SENDER_ID: "123456789",
   BUSINESS_ADMIN_TELEGRAM_IDS: "123456789,987654321",
   PRODUCT_OWNER_TELEGRAM_IDS: "111222333",

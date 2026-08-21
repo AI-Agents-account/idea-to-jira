@@ -10,6 +10,7 @@ Stage 04 implements the local access-control boundary while Jira write remains d
 - opaque action references plus record-version CAS for deterministic anti-replay;
 - atomic access/role mutation and append-only audit writes in `criticalTransaction`;
 - reusable own-Draft and active-Creator authorization APIs for duplicate disclosure, operation claim, and the immediate pre-POST recheck;
+- public Telegram private-DM ingress with a typed `/request_access` fast path for every numeric sender;
 - deterministic `before_agent_run` interception: only an active Creator grant or a startup-validated non-blocked Business Admin reaches the model;
 - typed `/request_access` and `/access` handlers that bypass the LLM.
 
@@ -26,9 +27,13 @@ Authorization keys are assembled only from OpenClaw-owned context:
 - numeric `senderId` equal to the direct-message destination;
 - no thread/topic.
 
+The Telegram channel and canonical account use `dmPolicy: "open"` plus `allowFrom: ["*"]`; both keep `groupPolicy: "disabled"`. Open transport admission is not application authorization. The plugin still rejects non-numeric, wrong-agent, wrong-channel/account, non-user, destination-mismatched and threaded contexts before any access mutation or model run. There is no exact pilot-sender comparison in requester validation.
+
 `PluginCommandContext.senderId`, channel/account, `from`/`to`, and thread fields are validated before a command reaches `AccessService`. On the confirmed Telegram native-command path, `senderId` is the plain numeric identity while both `from` and `to` must equal `telegram:<senderId>`; the adapter normalizes that verified binding back to the numeric access key. Command arguments, prompt text, username, display name, and opaque action references never establish actor identity. The Business Admin capability comes only from the startup-validated `BUSINESS_ADMIN_TELEGRAM_IDS` allowlist.
 
-Free-form turns are gated by the typed `before_agent_run` hook before model execution. The hook consumes OpenClaw's trusted `accountId`, `channelId`, `senderId`, direct-chat facts and authoritative access storage; it does not reconstruct identity from prompt text or usernames. `BLOCKED` always wins. Non-blocked Business Admins and users whose `CREATOR` state is backed by an `ACTIVE` Creator grant pass through. Guest, Pending, Suspended, Blocked, stale Creator, malformed identity, and storage failures are blocked without invoking the model; OpenClaw renders the bounded Russian policy message inside its standard block-response envelope. Native `/request_access` and `/access` commands are resolved by OpenClaw before this hook and retain their typed non-LLM handlers.
+Free-form turns are gated by the typed `before_agent_run` hook before model execution. The hook consumes OpenClaw's trusted `accountId`, `channelId`, `senderId`, direct-chat facts and authoritative access storage; it does not reconstruct identity from prompt text or usernames. `BLOCKED` always wins. Non-blocked Business Admins and users whose `CREATOR` state is backed by an `ACTIVE` Creator grant pass through. Guest, Pending, Suspended, Blocked, stale Creator, malformed identity, and storage failures are blocked without invoking the model. A Guest receives a fixed Russian instruction to send `/request_access`; Pending and Suspended users receive fixed status guidance. Typed `/request_access` and `/access` plugin commands are resolved before this hook and retain their non-LLM handlers.
+
+Core OpenClaw commands and directives are a separate boundary. Native and text core-command parsing is disabled, bash/config/MCP/plugin/debug/restart command surfaces are disabled, and `commands.allowFrom.telegram` plus `commands.ownerAllowFrom` contain only the controlled operator ID (`TELEGRAM_PILOT_SENDER_ID`) for any remaining directive/owner authorization. `/request_access` remains public because its plugin definition explicitly uses `requireAuth: false` and performs its own strict requester validation. Other Guest slash input is treated as untrusted text and then stopped by `before_agent_run`.
 
 The installed OpenClaw `2026.7.1-2` declarations were checked at the public `/plugin-sdk/core` command/runtime surface and the plugin registry surface represented by `/plugins/registry-types.d.ts`. The confirmed integration points are `OpenClawPluginApi.registerCommand`, `PluginCommandContext`, and `api.runtime.channel.outbound.loadAdapter(...).sendText(...)`.
 
@@ -44,11 +49,11 @@ Username and display-name fields are not present in the confirmed command, tool-
 /request_access
 ```
 
-A new trusted sender becomes `GUEST`. The first request atomically moves the user to `PENDING`, creates an opaque action reference, and appends `ACCESS_REQUESTED` audit evidence. Repeating the command while pending returns the existing status instead of creating a second request. Creator or suspended users also receive current status; blocked users are denied.
+A new numeric private-DM sender becomes `GUEST`. The first request atomically moves the user to `PENDING`, creates an opaque action reference, and appends `ACCESS_REQUESTED` audit evidence. Repeating the command returns the current status without creating a second request or notification. Creator or suspended users also receive current status; blocked users are denied.
 
 For a newly created request, the plugin sends a content-free card to every server-side Business Admin destination through the fixed Telegram account. The card contains only sender ID, optional untrusted identity snapshots, action reference, and version. It contains no idea, Draft, duplicate, Jira candidate, credential, or audit detail.
 
-### Status and Business Admin commands
+### Business Admin commands
 
 ```text
 /access status
@@ -63,6 +68,10 @@ For a newly created request, the plugin sends a content-free card to every serve
 ```
 
 Every mutating action revalidates the host-derived Business Admin identity, Telegram DM/channel/account binding, current database state, and expected record version. References identify server-side records but confer no authority. A completed, stale, or replayed action returns a bounded stale response and performs no second state or audit transition.
+
+`/access` is a Business Admin-only command, including its status form. Ordinary users receive only the instruction to send `/request_access`; transition syntax and access records are not disclosed. Every `/access` action fails before usage/action details are rendered unless the host-derived sender is in `BUSINESS_ADMIN_TELEGRAM_IDS`.
+
+The public `/request_access` handler consumes the existing process-local per-sender token bucket before it reads or mutates access state. Repeated requests remain idempotent and cannot create duplicate pending rows or duplicate Admin notifications; excessive retries receive a bounded retry-later response without invoking the model or Jira.
 
 ## 4. State transitions
 
@@ -105,6 +114,6 @@ Guest, suspended, revoked, blocked, unknown, and cross-peer callers receive no J
 
 ## 7. Verification and recovery
 
-Automated tests cover transition tables, duplicate requests, two-admin stale races, approve-vs-deny, role CAS, stale replay, audit rollback, forged admin IDs in command text, destination substitution, cross-peer Draft access, blocked/suspended callers, fixed Admin destinations, and content-free cards.
+Automated tests cover public numeric requester admission, non-numeric/group/thread/destination rejection, duplicate request idempotency, Guest pre-model blocking with `/request_access` guidance, role-gated tool exposure, two-admin stale races, approve-vs-deny, role CAS, stale replay, audit rollback, forged admin IDs in command text, hidden non-admin transitions, cross-peer Draft access, blocked/suspended callers, fixed Admin destinations, and content-free cards.
 
 After restart, request/action/grant state is read from SQLite. No in-memory callback authority exists. Rollback of this code must use the normal database backup/restore procedure; revoking a role never attempts to delete or reverse an already created Jira issue. Jira write remains disabled until the later create stage satisfies its independent gates.

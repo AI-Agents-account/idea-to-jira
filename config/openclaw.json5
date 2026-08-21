@@ -41,6 +41,26 @@
   session: {
     dmScope: "per-account-channel-peer",
   },
+  commands: {
+    // Public users may invoke plugin commands that explicitly set
+    // `requireAuth: false` (notably /request_access). Native/text core-command
+    // surfaces are disabled; remaining directive/owner authorization is
+    // limited to the controlled operator identity.
+    native: false,
+    nativeSkills: false,
+    text: false,
+    bash: false,
+    config: false,
+    mcp: false,
+    plugins: false,
+    debug: false,
+    restart: false,
+    allowFrom: {
+      telegram: ["${TELEGRAM_PILOT_SENDER_ID}"],
+    },
+    ownerAllowFrom: ["telegram:${TELEGRAM_PILOT_SENDER_ID}"],
+    useAccessGroups: true,
+  },
   bindings: [
     {
       agentId: "idea-mvp",
@@ -57,15 +77,15 @@
       // Use that same canonical account id so the env fallback cannot create a
       // second poller for the same bot token.
       defaultAccount: "default",
-      dmPolicy: "allowlist",
-      allowFrom: ["${TELEGRAM_PILOT_SENDER_ID}"],
+      dmPolicy: "open",
+      allowFrom: ["*"],
       groupPolicy: "disabled",
       accounts: {
         default: {
           enabled: true,
           botToken: "${TELEGRAM_BOT_TOKEN}",
-          dmPolicy: "allowlist",
-          allowFrom: ["${TELEGRAM_PILOT_SENDER_ID}"],
+          dmPolicy: "open",
+          allowFrom: ["*"],
           groupPolicy: "disabled",
         },
       },
@@ -88,7 +108,6 @@
           telegram: {
             channelId: "telegram",
             accountId: "default",
-            pilotSenderIdEnv: "TELEGRAM_PILOT_SENDER_ID",
             adminSenderIdsEnv: "BUSINESS_ADMIN_TELEGRAM_IDS",
           },
           notifications: {

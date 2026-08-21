@@ -2,7 +2,7 @@
 
 ## Цель и пользовательская ценность
 
-Проверить уже реализованные runtime/security, persistence, audit, RBAC и versioned Draft в одном настоящем Telegram DM с одним заранее доверенным numeric sender ID. Pilot собирает эксплуатационные evidence до разработки полного lifecycle и не открывает Jira create.
+Проверить runtime/security, persistence, audit, public access-request boundary, RBAC и versioned Draft в настоящих Telegram private DM. Controlled operator остаётся отдельной identity для admin/owner-directive smoke; pilot не открывает Jira create.
 
 ## Почему сейчас
 
@@ -11,13 +11,13 @@ Stages 01–05 дают безопасный локальный контур, к
 ## Зависимости и предусловия
 
 - Stages 01–05 приняты и локальные проверки проходят.
-- Используется отдельный Telegram bot через единственный canonical account `default`, agent `idea-mvp`, один numeric `TELEGRAM_PILOT_SENDER_ID`, включённый в pilot Business Admin allowlist, и reviewed canonical `openai/*` route.
+- Используется отдельный Telegram bot через canonical account `default`, agent `idea-mvp`, public numeric private-DM ingress, numeric controlled operator `TELEGRAM_PILOT_SENDER_ID` в Business Admin allowlist и reviewed canonical `openai/*` route.
 - Настоящие credentials и auth-profile state находятся только в runtime secret/state mounts, вне Git и отчётов.
 - Technical Owner явно разрешает окно smoke и имеет rollback/остановку Gateway.
 
 ## Scope
 
-- Только входящие текстовые Telegram DM от одного trusted pilot sender.
+- Только входящие текстовые Telegram private DM; любой numeric sender может вызвать typed `/request_access`, но модель/tools доступны только после server-side role admission.
 - Реальные host-derived channel/account/sender/destination checks до model run и повторно в каждом typed tool.
 - Stage-04 access/RBAC и Stage-05 own-Draft create/read/CAS patch/cancel.
 - Проверка audit/storage health и сохранения состояния после controlled restart.
@@ -25,29 +25,29 @@ Stages 01–05 дают безопасный локальный контур, к
 
 ## Вне scope
 
-- Group/topic, второй sender, voice/audio/image/video, arbitrary files/links и generic tools.
+- Group/topic, voice/audio/image/video, arbitrary files/links и generic tools.
 - Реализованный Catalog lifecycle, Jira metadata/read/search, duplicate decisions, READY/create orchestration, notifications и posting/reconciliation.
 - Любой Jira HTTP request, особенно `POST`; Jira credential не инжектируется.
 - Production traffic, broad beta, unattended operation и обещание production readiness.
 
 ## Реализуемые границы
 
-1. OpenClaw Telegram account использует `dmPolicy: "allowlist"`, `groupPolicy: "disabled"` и allowlist ровно из `TELEGRAM_PILOT_SENDER_ID`.
-2. Plugin effective config отдельно закрепляет тот же sender через protected env ref; несовпадение/отсутствие блокирует startup/run.
-3. `before_agent_run`, command и tool contexts принимают только `telegram` account `default`, agent `idea-mvp`, direct peer destination, user trigger и exact pilot sender.
-4. Agent tool allowlist содержит только пять Stage-04/05 tools; media audio understanding явно disabled.
+1. OpenClaw Telegram channel/account используют `dmPolicy: "open"`, `allowFrom: ["*"]`, `groupPolicy: "disabled"`.
+2. Native/text core-command parsing выключен; `TELEGRAM_PILOT_SENDER_ID` ограничивает remaining directive/owner authorization и controlled smoke, а plugin effective config не использует его как requester allowlist.
+3. `before_agent_run`, command и tool contexts принимают только `telegram` account `default`, agent `idea-mvp`, numeric direct peer destination и user trigger; Guest free-form блокируется до модели.
+4. Agent tool allowlist остаётся exact и tools скрыты/отклонены до role gate; media audio understanding явно disabled.
 5. Jira `writeMode` остаётся manifest `const: "disabled"`; runtime использует `DisabledJiraIssueClient`, не получает Jira credential и не содержит create tool/transport.
 6. `readiness:pilot` проверяет effective OpenClaw/plugin boundaries, model route, Catalog checksum, disabled Jira adapter и storage health, не вызывая Telegram, OpenAI или Jira.
 
 ## Атомарные инженерные задачи
 
 1. Зафиксировать Stage-05A в карте задач сразу после Stage-05; поздние full lifecycle и voice оставить deferred.
-2. Добавить protected `TELEGRAM_PILOT_SENDER_ID` в plugin schema/effective config и exact-sender requester gate.
-3. Перевести Telegram DM policy с open wildcard на exact allowlist; оставить groups disabled и peer-isolated sessions.
+2. Зарегистрировать public typed `/request_access` с idempotent status и строгой host-derived DM validation без model run.
+3. Перевести Telegram DM policy на open wildcard, оставить groups disabled/peer-isolated sessions, отключить native/text core commands и отдельно ограничить remaining directive/owner authorization controlled operator identity.
 4. Закрепить reviewed model route через `OPENAI_MODEL`; отключить audio understanding.
 5. Удалить Jira credential из Compose/.env pilot runtime; сохранить fixed Jira scope только как fail-closed конфигурацию.
 6. Добавить offline structural readiness и live-local readiness с безопасными кодами без raw exceptions/IDs/secrets.
-7. Добавить regression tests на wrong sender, config drift, DM wildcard absence, text-only policy, storage restart, RBAC/Draft/CAS и disabled Jira writes.
+7. Добавить regression tests на public numeric sender, malformed/group/thread/destination rejection, Guest pre-model/tool gate, command boundary, text-only policy, storage restart, RBAC/Draft/CAS и disabled Jira writes.
 8. Опубликовать операторский runbook с prechecks, positive/negative smoke, restart proof, evidence и rollback.
 
 ## Catalog-before-duplicate/READY/create invariant
@@ -56,17 +56,17 @@ Stage-05A не активирует Catalog и поэтому не может в
 
 ## Тесты и проверяемые evidence
 
-- Config/unit: missing/invalid/drifted pilot sender отклоняется; Jira token не требуется и не сохраняется.
-- Requester/security: wrong sender, group-like destination, thread, wrong channel/account/trigger блокируются.
-- Deployment: нет wildcard/open DM, generic/media/Jira tools; audio disabled; Compose не передаёт `JIRA_TOKEN`.
+- Config/unit: controlled operator отсутствует/invalid или не входит в Admin allowlist — readiness отклоняется; plugin requester config от него не зависит.
+- Requester/security: любой numeric private-DM sender принят; non-numeric, group-like destination, thread, wrong channel/account/trigger блокируются.
+- Deployment: public wildcard/open DM сочетается с disabled groups, disabled native/text core commands и controlled directive/owner allowlists; generic tools отсутствуют, audio disabled, Compose не передаёт `JIRA_TOKEN`.
 - RBAC/Draft: access anti-replay, own-Draft boundaries, immutable versions, stale CAS и cancel.
 - Persistence/restart: schema/quick/FK health, WAL restart и reopened Draft/version state.
 - Jira: config/manifest gate disabled и adapter deterministic throw; ни один test/smoke step не делает network POST.
 
 ## Проверяемые критерии приёмки
 
-1. Неавторизованный sender не достигает model run, command или tool mutation.
-2. Trusted sender может пройти RBAC flow и создать/прочитать/изменить/отменить только собственный Draft через Telegram DM text.
+1. Guest sender может выполнить только typed access/status flow и не достигает model run, core command/directive execution или tool mutation.
+2. Approved Creator может пройти RBAC flow и создать/прочитать/изменить/отменить только собственный Draft через Telegram DM text.
 3. После controlled restart текущий access state, Draft ID и version сохраняются.
 4. Voice/media не транскрибируется и не изменяет Draft; text-only ограничение отражено в readiness/config.
 5. Catalog остаётся непригодным для READY; duplicate/READY/create отсутствуют.

@@ -147,6 +147,10 @@ function isActiveCreator(runtime: RuntimeServices, requester: TrustedRequesterCo
   return decision.allowed && decision.via === "ACTIVE_CREATOR";
 }
 
+function isConversationAllowed(runtime: RuntimeServices, requester: TrustedRequesterContext): boolean {
+  return runtime.accessService.authorizeConversation(requester).allowed;
+}
+
 function mappedToolError(error: unknown): "JIRA_AUTH_FAILED" | "JIRA_RATE_LIMITED" | "JIRA_SCOPE_INVALID" | "JIRA_UNAVAILABLE" | "JIRA_REQUEST_FAILED" | undefined {
   if (!(error instanceof JiraFailure)) return undefined;
   if (error.code === "JIRA_UNAUTHORIZED" || error.code === "JIRA_FORBIDDEN") return "JIRA_AUTH_FAILED";
@@ -312,7 +316,9 @@ const plugin = {
 
     registerAccessCommands(api, config, () => {
       const runtime = getServiceRuntime();
-      return runtime ? { config: runtime.config, service: runtime.accessService } : undefined;
+      return runtime
+        ? { config: runtime.config, service: runtime.accessService, limiter: runtime.limiter }
+        : undefined;
     }, getServiceRuntimeStatus);
 
     api.registerGatewayMethod("idea-to-jira.runtime-status", ({ respond }) => {
@@ -438,6 +444,9 @@ const plugin = {
       }
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
       if (!requester.ok) throw new SafeError("ACCESS_DENIED", false);
+      if (!isConversationAllowed(activeRuntime, requester.context)) {
+        throw new SafeError("ACCESS_DENIED", false);
+      }
       const activeStorage = activeRuntime.storage;
       try {
         requireRateLimit(activeRuntime.limiter, requester.context, "draft_tool");
@@ -474,7 +483,7 @@ const plugin = {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime) return null;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) return null;
+      if (!requester.ok || !isConversationAllowed(activeRuntime, requester.context)) return null;
       return {
         name: "idea_to_jira_create_draft",
         label: "Create own Draft",
@@ -489,7 +498,7 @@ const plugin = {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime) return null;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) return null;
+      if (!requester.ok || !isConversationAllowed(activeRuntime, requester.context)) return null;
       return {
         name: "idea_to_jira_read_draft",
         label: "Read own Draft",
@@ -504,7 +513,7 @@ const plugin = {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime) return null;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) return null;
+      if (!requester.ok || !isConversationAllowed(activeRuntime, requester.context)) return null;
       return {
         name: "idea_to_jira_patch_draft",
         label: "Patch own Draft",
@@ -519,7 +528,7 @@ const plugin = {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime) return null;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) return null;
+      if (!requester.ok || !isConversationAllowed(activeRuntime, requester.context)) return null;
       return {
         name: "idea_to_jira_cancel_draft",
         label: "Cancel own Draft",
@@ -633,7 +642,7 @@ const plugin = {
       const activeRuntime = getServiceRuntime();
       if (!activeRuntime) return null;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) return null;
+      if (!requester.ok || !isConversationAllowed(activeRuntime, requester.context)) return null;
       return {
         name: "idea_to_jira_request_access",
         label: "Request Creator access",

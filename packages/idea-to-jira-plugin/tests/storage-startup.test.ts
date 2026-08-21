@@ -263,6 +263,16 @@ test("before_agent_run is the sole role gate and BLOCKED overrides Business Admi
     chatId: "123456789",
   } satisfies PluginHookAgentContext;
 
+  const guestEvent = { ...event, senderId: "222222222" } satisfies PluginHookBeforeAgentRunEvent;
+  const guestContext = { ...context, chatId: "222222222" } satisfies PluginHookAgentContext;
+  assert.deepEqual(gate(guestEvent, guestContext), {
+    outcome: "block",
+    reason: "GUEST",
+    message: CONVERSATION_ROLE_REPLIES.GUEST,
+    category: "access_policy",
+  });
+  assert.match(CONVERSATION_ROLE_REPLIES.GUEST, /\/request_access/);
+
   assert.deepEqual(gate(event, context), { outcome: "pass" });
 
   const runtime = getServiceRuntime();

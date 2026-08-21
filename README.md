@@ -22,8 +22,8 @@
 - typed `/request_access` and `/access` command handlers, fixed server-side Admin destinations, content-free access cards and reusable own-Draft/active-Creator authorization checks;
 - unit/security/config/deployment/storage-тесты, TypeScript type-check, JSON/OpenClaw validators и CI;
 - Dockerfile и Compose-каркас выделенного OpenClaw Gateway/CLI с постоянными томами и ограничениями контейнера;
-- OpenClaw-конфигурация с отдельным агентом, Telegram DM, peer-scoped сессиями и allowlist только из пяти реализованных plugin tools;
-- Stage-05A boundary: DM allowlist одного protected numeric sender, повторная plugin-side sender check, explicit audio-understanding disable и offline/live-local readiness;
+- OpenClaw-конфигурация с отдельным агентом, публичным Telegram private-DM ingress, peer-scoped сессиями и allowlist только из десяти реализованных plugin tools;
+- public access boundary: любой numeric sender в private DM может выполнить typed `/request_access` без модели; до активной роли free-form блокируется server-side, группы и native/text core-command surfaces выключены, а remaining directive/owner authorization ограничена controlled operator;
 - pilot runtime не инжектирует Jira credential; disabled adapter и manifest/config gate исключают Jira POST;
 - заготовка Knowledge Catalog, намеренно неполная и не пригодная для production-маршрутизации.
 
@@ -48,8 +48,8 @@ Guest/Creator/Business Admin access lifecycle реализован в Stage 04; 
 
 | Роль | Назначение |
 | --- | --- |
-| **Guest** | Готовит собственный Draft и запрашивает допуск, но не видит детали Jira-дублей и не создаёт задачу. |
-| **Creator** | Guest с активным допуском; принимает решение по дублям, после чего готовый Draft может автоматически перейти к create без отдельной кнопки или preview. |
+| **Guest** | Может только отправить typed `/request_access` и получить текущий статус; free-form и tools блокируются до модели. |
+| **Creator** | Пользователь с активным допуском; ведёт Draft, принимает решение по дублям, после чего готовый Draft может автоматически перейти к create через confirmation boundary. |
 | **Business Admin** | Server-side подтверждает доверие к точному Telegram sender ID, выдаёт/отзывает Creator и работает с санитаризированным аудитом. Не получает доступ к хосту или секретам. |
 | **Product Owner (PO)** | Получает уведомление после подтверждённого create и продолжает стандартный процесс в Jira. |
 | **Technical Owner** | Развёртывает систему, управляет секретами, backup/restore и вручную разбирает `UNKNOWN`. |
@@ -113,11 +113,11 @@ cp .env.example .env
 | `OPENCLAW_AUTH_PROFILE_SECRET_DIR` | Host-каталог с локальным encryption key для OAuth-backed auth profiles; по умолчанию `./data/auth-profile-secrets`. Должен монтироваться и в Gateway, и в CLI, храниться вне Git и резервироваться отдельно от config/state. |
 | `OPENCLAW_GATEWAY_TOKEN` | Новый длинный случайный token только для этого Gateway. |
 | `TELEGRAM_BOT_TOKEN` | Token отдельного бота от BotFather. |
-| `TELEGRAM_PILOT_SENDER_ID` | Единственный numeric Telegram sender ID для controlled DM pilot; тот же ID повторно проверяет plugin runtime. |
+| `TELEGRAM_PILOT_SENDER_ID` | Numeric Telegram ID controlled operator для smoke и remaining directive/owner authorization. Не является allowlist публичного `/request_access` и не участвует в plugin requester validation. |
 | `OPENAI_MODEL` | Reviewed canonical route `openai/<available-model>` для агента. Placeholder из `.env.example` не live-ready. |
 | `JIRA_BASE_URL` | HTTPS origin целевой Jira без публикации внутреннего адреса в документации. |
 | Jira credential | Не добавлять в `.env`. Положить Jira PAT (значение Bearer token, без префикса `Bearer`) в ignored-файл `data/secrets/jira-token` с mode `0600`; без файла Draft работает, а Jira workflow недоступен. |
-| `BUSINESS_ADMIN_TELEGRAM_IDS` | Разделённые запятыми numeric sender IDs доверенных администраторов. Controlled one-actor pilot требует включить `TELEGRAM_PILOT_SENDER_ID`; только allowlisted host-derived IDs могут выполнять Stage-04 transitions. |
+| `BUSINESS_ADMIN_TELEGRAM_IDS` | Разделённые запятыми numeric sender IDs доверенных администраторов. Controlled operator из `TELEGRAM_PILOT_SENDER_ID` должен входить в список; только эти host-derived IDs могут выполнять Stage-04 transitions. |
 | `PRODUCT_OWNER_TELEGRAM_IDS` | Server-side allowlist numeric Telegram destinations для будущих PO notifications; startup проверяет формат и непустое значение. |
 
 Jira MVP задаёт в plugin/deployment config Jira URL, project key, issue-type name, fixed JQL, список читаемых issue fields и bounds; numeric Jira IDs/schema получаются только при startup/refresh. Create доступен только активному Creator после discovery, duplicate decision, dynamic-field validation, exact preview и actor/chat/version-bound confirmation. Credential остаётся runtime file-secret и не попадает в effective config, Git, SQLite, audit или model context.
@@ -258,7 +258,7 @@ docker compose exec openclaw-gateway node /app/scripts/create-readiness.mjs
 docker compose logs --follow --tail=100 openclaw-gateway
 ```
 
-Healthcheck подтверждает только liveness HTTP endpoint Gateway. `pilot-readiness.mjs` локально проверяет controlled DM/model/tool/Jira readiness boundaries и через authenticated loopback Gateway RPC требует `READY` именно от активного поколения plugin runtime с healthy storage; отдельное открытие SQLite не считается runtime-readiness. Скрипт не вызывает Telegram, OpenAI или Jira. Отдельный `create-readiness.mjs` проверяет статический confirmation/tool contract; фактическая create-readiness остаётся runtime-сигналом discovery и не подменяется pilot readiness.
+Healthcheck подтверждает только liveness HTTP endpoint Gateway. `pilot-readiness.mjs` локально проверяет public private-DM ingress, disabled groups, controlled core-command boundary, model/tool/Jira readiness и через authenticated loopback Gateway RPC требует `READY` именно от активного поколения plugin runtime с healthy storage; отдельное открытие SQLite не считается runtime-readiness. Скрипт не вызывает Telegram, OpenAI или Jira. Отдельный `create-readiness.mjs` проверяет статический confirmation/tool contract; фактическая create-readiness остаётся runtime-сигналом discovery и не подменяется pilot readiness.
 
 ## Безопасность и граница запуска
 

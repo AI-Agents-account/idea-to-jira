@@ -101,6 +101,13 @@ test("registered typed tools perform own-Draft create/read/CAS patch/cancel end 
   ]);
   assert.equal(tools.has("jira_create"), false);
 
+  const guestToolContext = {
+    ...toolContext,
+    requesterSenderId: "222222222",
+    deliveryContext: { channel: "telegram", accountId: "default", to: "222222222" },
+  } as OpenClawPluginToolContext;
+  assert.equal(factories.every((factory) => factory(guestToolContext) === null), true);
+
   const created = (await tools.get("idea_to_jira_create_draft")?.execute("create", {
     summary: "Сократить онбординг",
     context: "Пользователь не находит импорт.",
