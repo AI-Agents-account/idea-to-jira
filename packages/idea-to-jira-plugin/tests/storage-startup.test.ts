@@ -187,7 +187,7 @@ test("storage service gates requests until schema health succeeds and closes cle
   assert.ok(afterStart);
   assert.equal(afterStart.outcome, "pass");
   assert.match(
-    info[0] ?? "",
+    info.find((message) => message.startsWith("idea-to-jira runtime action=registered")) ?? "",
     /^idea-to-jira runtime action=registered registration_generation=1 phase=NOT_STARTED generation=1 latest_generation=1 instance=absent$/,
   );
   assert.deepEqual(info.filter((message) => message.startsWith("{"))
@@ -424,7 +424,7 @@ test("agent-runtime pre-warm registration does not displace the started Gateway 
   assert.equal(beforeServiceStart.generation, 2);
   assert.equal(beforeServiceStart.latestGeneration, 2);
   assert.match(
-    agentRuntimeCopy.info[0] ?? "",
+    agentRuntimeCopy.info.find((message) => message.startsWith("idea-to-jira runtime action=registered")) ?? "",
     /^idea-to-jira runtime action=registered registration_generation=2 phase=NOT_STARTED generation=2 latest_generation=2 instance=absent$/,
   );
 
@@ -451,7 +451,7 @@ test("agent-runtime pre-warm registration does not displace the started Gateway 
   assert.equal(afterLatePrewarm.instanceId, initial.instanceId);
   assert.equal(afterLatePrewarm.storageHealthy, true);
   assert.match(
-    lateAgentRuntimeCopy.info[0] ?? "",
+    lateAgentRuntimeCopy.info.find((message) => message.startsWith("idea-to-jira runtime action=registered")) ?? "",
     /^idea-to-jira runtime action=registered registration_generation=3 phase=READY generation=1 latest_generation=3 instance=present$/,
   );
 

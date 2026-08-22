@@ -47,6 +47,21 @@ function numericTelegramId(value: string | undefined): value is string {
   return value !== undefined && /^[1-9][0-9]{0,19}$/.test(value);
 }
 
+/**
+ * OpenClaw 2026.7 passes canonical Telegram delivery targets as
+ * `telegram:<chat-id>`. Keep accepting the older plain-id projection, but do
+ * not accept topics, other providers, or any lossy suffix extraction.
+ */
+export function telegramDirectChatId(value: unknown, channelId: string): string | undefined {
+  const target = normalized(value);
+  if (target === undefined) return undefined;
+  if (/^[1-9][0-9]{0,19}$/.test(target)) return target;
+  const prefix = `${channelId}:`;
+  if (!target.startsWith(prefix)) return undefined;
+  const chatId = target.slice(prefix.length);
+  return numericTelegramId(chatId) ? chatId : undefined;
+}
+
 export function validateRequesterFacts(facts: RequesterFacts, config: EffectiveConfig): RequesterContextResult {
   const agentId = normalized(facts.agentId);
   const channelId = normalized(facts.channelId);
@@ -82,14 +97,30 @@ export function requesterFromToolContext(
   config: EffectiveConfig,
 ): RequesterContextResult {
   if (context.oneShotCliRun === true) return { ok: false, code: "TRIGGER_DENIED" };
+  const delivery = context.deliveryContext;
+  // Both top-level identity dimensions and the ambient delivery tuple are
+  // host-populated. Require them to agree instead of allowing one to mask a
+  // contradictory value in the other.
+  if (normalized(context.messageChannel) !== config.telegram.channelId) {
+    return { ok: false, code: "CHANNEL_DENIED" };
+  }
+  if (normalized(delivery?.channel) !== config.telegram.channelId) {
+    return { ok: false, code: "CHANNEL_DENIED" };
+  }
+  if (normalized(context.agentAccountId) !== config.telegram.accountId) {
+    return { ok: false, code: "ACCOUNT_DENIED" };
+  }
+  if (normalized(delivery?.accountId) !== config.telegram.accountId) {
+    return { ok: false, code: "ACCOUNT_DENIED" };
+  }
   return validateRequesterFacts(
     {
       agentId: context.agentId,
-      channelId: context.messageChannel ?? context.deliveryContext?.channel,
-      accountId: context.agentAccountId ?? context.deliveryContext?.accountId,
+      channelId: context.messageChannel,
+      accountId: context.agentAccountId,
       senderId: context.requesterSenderId,
-      chatId: context.deliveryContext?.to,
-      threadId: context.deliveryContext?.threadId,
+      chatId: telegramDirectChatId(delivery?.to, config.telegram.channelId),
+      threadId: delivery?.threadId,
     },
     config,
   );
@@ -129,6 +160,10 @@ export function requesterFromAgentRun(
   config: EffectiveConfig,
 ): RequesterContextResult {
   if (context.trigger !== "user") return { ok: false, code: "TRIGGER_DENIED" };
+  const chatId = telegramDirectChatId(
+    context.chatId ?? context.channelId ?? context.channel,
+    config.telegram.channelId,
+  );
   return validateRequesterFacts(
     {
       agentId: context.agentId,
@@ -136,7 +171,7 @@ export function requesterFromAgentRun(
       channelId: event.channelId ?? context.messageProvider,
       accountId: event.accountId,
       senderId: event.senderId ?? context.senderId,
-      chatId: context.chatId ?? context.channelId ?? context.channel,
+      chatId,
     },
     config,
   );
@@ -156,6 +191,7 @@ export function requesterFromBeforeDispatch(
   const sessionKey = normalized(context.sessionKey ?? event.sessionKey);
   const sessionParts = sessionKey?.split(":") ?? [];
   const agentId = sessionParts[0] === "agent" ? sessionParts[1] : undefined;
+  const chatId = telegramDirectChatId(context.conversationId, config.telegram.channelId);
   return validateRequesterFacts(
     {
       agentId,
@@ -163,7 +199,7 @@ export function requesterFromBeforeDispatch(
       channelId: event.channel ?? context.channelId,
       accountId: context.accountId,
       senderId: event.senderId ?? context.senderId,
-      chatId: context.conversationId,
+      chatId,
       threadId: event.isGroup === true ? "group" : undefined,
     },
     config,

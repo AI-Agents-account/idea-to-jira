@@ -55,8 +55,14 @@ export interface RuntimeExecutionLease {
   release(): void;
 }
 
+export type DraftToolExecutionPolicy = Pick<RuntimeServices, "config" | "limiter">;
+
 export interface DraftToolExecutionRuntimeBoundary {
-  acquire(): RuntimeExecutionLease;
+  /**
+   * Runs policy preflight against the runtime this lease will use. When no
+   * Gateway runtime is READY, preflight runs before execution storage opens.
+   */
+  acquire(preflight: (policy: DraftToolExecutionPolicy) => void): RuntimeExecutionLease;
 }
 
 interface RuntimeRecord {
@@ -178,14 +184,29 @@ export function createDraftToolExecutionRuntimeBoundary(
   };
   let ownedRuntime: RuntimeServices | undefined;
   let leases = 0;
+  let closeFailure: unknown;
+  const registrationPolicy: DraftToolExecutionPolicy = Object.freeze({ config, limiter });
 
   return Object.freeze({
-    acquire(): RuntimeExecutionLease {
+    acquire(preflight: (policy: DraftToolExecutionPolicy) => void): RuntimeExecutionLease {
+      // Every discovery registration owns one limiter. Apply it even when a
+      // READY Gateway runtime is borrowed so switching runtime sources cannot
+      // reset or bypass this registration's abuse boundary.
+      preflight(registrationPolicy);
       const serviceRuntime = getServiceRuntime();
       if (serviceRuntime) {
+        // The live runtime may have tighter policy than the discovery copy.
+        // Enforce both snapshots, but do not consume the same limiter twice.
+        if (serviceRuntime.config !== config || serviceRuntime.limiter !== limiter) {
+          preflight(serviceRuntime);
+        }
         return Object.freeze({ runtime: serviceRuntime, release() {} });
       }
 
+      // A failed final close leaves at most this one retained runtime. Refuse
+      // to open additional connections rather than turning repeated calls
+      // into an unbounded resource leak.
+      if (closeFailure !== undefined) throw closeFailure;
       ownedRuntime ??= createServiceRuntimeCandidate(config, draftOnlyFactories, {
         limiter,
         migrationMode: "verify-current",
@@ -200,8 +221,13 @@ export function createDraftToolExecutionRuntimeBoundary(
           released = true;
           leases -= 1;
           if (leases !== 0 || ownedRuntime !== runtime) return;
-          ownedRuntime = undefined;
-          runtime.storage.close();
+          try {
+            runtime.storage.close();
+            ownedRuntime = undefined;
+          } catch (error) {
+            closeFailure = error;
+            throw error;
+          }
         },
       });
     },

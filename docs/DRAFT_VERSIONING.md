@@ -53,23 +53,33 @@ Patch accepts only the declared domain fields, `expectedVersion`, typed provenan
 
 Normal `registrationMode: "full"` keeps the existing service-owned runtime,
 hooks, commands and Gateway status method. `registrationMode: "tool-discovery"`
-does not register those channel/runtime surfaces. For a valid host-derived
-Telegram tool context, its factories publish the four callable Draft schemas
-without opening SQLite, running migrations, constructing Jira clients or
-starting timers. Malformed host contexts receive no schema. The access-request
-and Jira tools are not published by this mode.
+does not register those channel/runtime surfaces. OpenClaw may invoke a factory
+for catalog discovery with only workspace and agent metadata, so the factory
+publishes the four callable Draft schemas when that sparse context contains no
+contradictory route facts. Explicit wrong-agent, wrong-channel, wrong-account,
+threaded or mismatched sender/destination contexts receive no schema.
+Registration and catalog discovery do not open SQLite, run migrations,
+construct Jira clients or start timers. The access-request and Jira tools are
+not published by this mode.
 
 A discovered Draft tool executes through a bounded Draft-only runtime lease.
-The lease borrows a READY Gateway runtime when one exists; otherwise it opens
-only the existing configured SQLite database after verifying the exact current
-schema version. It never creates or migrates storage, and closes owned storage
-when the final overlapping call ends. It never constructs or starts the Jira workflow and shares
-one registration-scoped rate limiter across sequential calls. Execution
-revalidates the host-derived Telegram requester and current conversation RBAC,
-then enforces payload/create gates, mandatory security audit, owner checks and
-Draft CAS rules. Guest, malformed, cross-route and stale-role callers therefore
-fail closed even though schema discovery itself is non-activating. Tool input
-remains unable to supply identity.
+Before SQLite can open, execution requires a complete host-derived Telegram
+private-DM identity and enforces payload, create-disabled and
+registration-scoped rate gates. The lease borrows a READY Gateway runtime when
+one exists and additionally enforces its live policy; otherwise it opens only
+the existing configured SQLite database after verifying the exact current
+schema version. It never creates or migrates storage. Owned storage closes when
+the final overlapping call ends; a failed final close poisons that boundary and
+prevents further connections until process restart rather than leaking
+unbounded runtimes. It never constructs or starts the Jira workflow.
+
+After storage is available, execution revalidates current conversation RBAC and
+records bounded mandatory security audit decisions before owner checks and
+Draft CAS rules. Guest, PENDING, SUSPENDED, BLOCKED, malformed, cross-route and
+stale-role callers therefore fail closed even though schema discovery itself is
+non-activating. BLOCKED overrides configured Business Admin membership. Tool
+input remains unable to supply identity, and operational diagnostics disclose
+only bounded context shape and reason codes, never sender or route identifiers.
 
 ## Validation and formatting
 
