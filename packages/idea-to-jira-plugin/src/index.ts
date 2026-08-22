@@ -18,6 +18,7 @@ import {
 import { JiraFailure } from "./jira/types.js";
 import {
   beginServiceRuntime,
+  createDraftToolExecutionRuntimeBoundary,
   createServiceRuntimeCandidate,
   createServiceRuntimeGeneration,
   failServiceRuntime,
@@ -240,8 +241,13 @@ const plugin = {
   name: "Idea-to-Jira MVP",
   description: "Configuration-driven Draft-to-Jira MVP with bounded search and atomic confirmed create.",
   register(api: OpenClawPluginApi) {
+    const toolDiscovery = api.registrationMode === "tool-discovery";
     const loaded = loadEffectiveConfig(api.pluginConfig);
     if (!loaded.ok) {
+      if (toolDiscovery) {
+        api.logger.error(`idea-to-jira tool discovery disabled code=${loaded.code}`);
+        return;
+      }
       registerStartupDisabledGate(api, loaded.code);
       return;
     }
@@ -249,7 +255,11 @@ const plugin = {
     const config = loaded.config;
     assertCreateDisabled(config);
     const logger = new StructuredLogger(api.logger);
-    const runtimeGeneration = createServiceRuntimeGeneration();
+    const draftToolExecutionBoundary = toolDiscovery
+      ? createDraftToolExecutionRuntimeBoundary(config)
+      : undefined;
+
+    const runtimeGeneration = toolDiscovery ? 0 : createServiceRuntimeGeneration();
     let ownedInstanceId: string | undefined;
     let ownedStorage: PluginDatabase | undefined;
     let ownedJiraWorkflow: RuntimeServices["jiraWorkflow"];
@@ -275,21 +285,23 @@ const plugin = {
       }
     };
 
-    try {
-      const status = getServiceRuntimeStatus();
-      api.logger.info(
-        `idea-to-jira runtime action=registered` +
-        ` registration_generation=${runtimeGeneration}` +
-        ` phase=${status.phase}` +
-        ` generation=${status.generation}` +
-        ` latest_generation=${status.latestGeneration}` +
-        ` instance=${status.instanceId ? "present" : "absent"}`,
-      );
-    } catch {
-      // Registration diagnostics must not affect service startup.
+    if (!toolDiscovery) {
+      try {
+        const status = getServiceRuntimeStatus();
+        api.logger.info(
+          `idea-to-jira runtime action=registered` +
+          ` registration_generation=${runtimeGeneration}` +
+          ` phase=${status.phase}` +
+          ` generation=${status.generation}` +
+          ` latest_generation=${status.latestGeneration}` +
+          ` instance=${status.instanceId ? "present" : "absent"}`,
+        );
+      } catch {
+        // Registration diagnostics must not affect service startup.
+      }
     }
 
-    api.registerService({
+    if (!toolDiscovery) api.registerService({
       id: "idea-to-jira-storage",
       start() {
         if (!beginServiceRuntime(runtimeGeneration)) {
@@ -332,14 +344,14 @@ const plugin = {
       },
     });
 
-    registerAccessCommands(api, config, () => {
+    if (!toolDiscovery) registerAccessCommands(api, config, () => {
       const runtime = getServiceRuntime();
       return runtime
         ? { config: runtime.config, service: runtime.accessService, limiter: runtime.limiter }
         : undefined;
     }, getServiceRuntimeStatus);
 
-    api.registerGatewayMethod("idea-to-jira.runtime-status", ({ respond }) => {
+    if (!toolDiscovery) api.registerGatewayMethod("idea-to-jira.runtime-status", ({ respond }) => {
       const status = getServiceRuntimeStatus();
       const active = getServiceRuntime();
       respond(true, {
@@ -357,7 +369,7 @@ const plugin = {
       });
     }, { scope: "operator.read" });
 
-    api.on("before_dispatch", (
+    if (!toolDiscovery) api.on("before_dispatch", (
       event: PluginHookBeforeDispatchEvent,
       context: PluginHookBeforeDispatchContext,
     ): PluginHookBeforeDispatchResult => {
@@ -421,7 +433,7 @@ const plugin = {
       };
     }, { priority: 1_000 });
 
-    api.on("before_agent_run", (
+    if (!toolDiscovery) api.on("before_agent_run", (
       event: PluginHookBeforeAgentRunEvent,
       context: PluginHookAgentContext,
     ): PluginHookBeforeAgentRunResult => {
@@ -519,18 +531,24 @@ const plugin = {
         requester: ReturnType<typeof requesterFromToolContext> & { readonly ok: true },
       ) => T | Promise<T>,
     ): Promise<{ content: Array<{ type: "text"; text: string }>; details: T }> {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) {
-        logRuntimeDiagnostic(api, "tool_execute", getServiceRuntimeStatus());
-        throw new SafeError("STORAGE_NOT_READY", false);
-      }
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) throw new SafeError("ACCESS_DENIED", false);
-      if (!isConversationAllowed(activeRuntime, requester.context)) {
-        throw new SafeError("ACCESS_DENIED", false);
-      }
-      const activeStorage = activeRuntime.storage;
+      let lease: ReturnType<NonNullable<typeof draftToolExecutionBoundary>["acquire"]> | undefined;
       try {
+        try {
+          lease = draftToolExecutionBoundary?.acquire();
+        } catch (error) {
+          throw new SafeError("STORAGE_NOT_READY", false, { cause: error });
+        }
+        const activeRuntime = lease?.runtime ?? getServiceRuntime();
+        if (!activeRuntime) {
+          logRuntimeDiagnostic(api, "tool_execute", getServiceRuntimeStatus());
+          throw new SafeError("STORAGE_NOT_READY", false);
+        }
+        const requester = requesterFromToolContext(toolContext, activeRuntime.config);
+        if (!requester.ok) throw new SafeError("ACCESS_DENIED", false);
+        if (!isConversationAllowed(activeRuntime, requester.context)) {
+          throw new SafeError("ACCESS_DENIED", false);
+        }
+        const activeStorage = activeRuntime.storage;
         requireRateLimit(activeRuntime.limiter, requester.context, "draft_tool");
         assertPayloadWithinLimit(input, activeRuntime.config);
         assertCreateDisabled(activeRuntime.config);
@@ -558,14 +576,46 @@ const plugin = {
         const message = error instanceof Error ? error.message : "";
         const code = mapped ?? (isSafeErrorCode(message) ? message : message === "JIRA_ANSWER_FIELD_NOT_ALLOWED" ? "JIRA_REQUIRED_ANSWER_INVALID" : "DRAFT_INVALID");
         throw new SafeError(code, code === "RATE_LIMITED", { cause: error });
+      } finally {
+        try {
+          lease?.release();
+        } catch {
+          // The domain operation may already be committed. Never replace its
+          // truthful result with a close error that could trigger a duplicate retry.
+          try {
+            api.logger.error("idea-to-jira tool runtime release failed code=STORAGE_CLOSE_FAILED");
+          } catch {
+            // Bounded cleanup diagnostics must not alter the tool result.
+          }
+        }
       }
     }
 
-    api.registerTool((toolContext) => {
+    function registerForRequester(
+      toolContext: Parameters<typeof requesterFromToolContext>[0],
+      options: {
+        readonly activeCreator?: boolean;
+        readonly draftToolDiscovery?: boolean;
+        readonly jira?: boolean;
+      } = {},
+    ): boolean {
+      // Discovery must be schema-only: no database, migrations, Jira clients,
+      // RBAC lookup, or timers. The returned tool revalidates this host-derived
+      // context and current RBAC at execution time before any domain action.
+      if (toolDiscovery) {
+        return options.draftToolDiscovery === true && requesterFromToolContext(toolContext, config).ok;
+      }
       const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) return null;
+      if (!activeRuntime || (options.jira === true && !activeRuntime.jiraWorkflow)) return false;
       const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !isConversationAllowed(activeRuntime, requester.context)) return null;
+      if (!requester.ok) return false;
+      return options.activeCreator === true
+        ? isActiveCreator(activeRuntime, requester.context)
+        : isConversationAllowed(activeRuntime, requester.context);
+    }
+
+    api.registerTool((toolContext) => {
+      if (!registerForRequester(toolContext, { draftToolDiscovery: true })) return null;
       return {
         name: "idea_to_jira_create_draft",
         label: "Create own Draft",
@@ -577,10 +627,7 @@ const plugin = {
     }, { name: "idea_to_jira_create_draft" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !isConversationAllowed(activeRuntime, requester.context)) return null;
+      if (!registerForRequester(toolContext, { draftToolDiscovery: true })) return null;
       return {
         name: "idea_to_jira_read_draft",
         label: "Read own Draft",
@@ -592,10 +639,7 @@ const plugin = {
     }, { name: "idea_to_jira_read_draft" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !isConversationAllowed(activeRuntime, requester.context)) return null;
+      if (!registerForRequester(toolContext, { draftToolDiscovery: true })) return null;
       return {
         name: "idea_to_jira_patch_draft",
         label: "Patch own Draft",
@@ -607,10 +651,7 @@ const plugin = {
     }, { name: "idea_to_jira_patch_draft" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !isConversationAllowed(activeRuntime, requester.context)) return null;
+      if (!registerForRequester(toolContext, { draftToolDiscovery: true })) return null;
       return {
         name: "idea_to_jira_cancel_draft",
         label: "Cancel own Draft",
@@ -622,10 +663,7 @@ const plugin = {
     }, { name: "idea_to_jira_cancel_draft" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !isActiveCreator(activeRuntime, requester.context)) return null;
+      if (!registerForRequester(toolContext, { activeCreator: true, jira: true })) return null;
       return {
         name: "idea_to_jira_search_duplicates",
         label: "Search configured Jira scope",
@@ -641,10 +679,7 @@ const plugin = {
     }, { name: "idea_to_jira_search_duplicates" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !isActiveCreator(activeRuntime, requester.context)) return null;
+      if (!registerForRequester(toolContext, { activeCreator: true, jira: true })) return null;
       return {
         name: "idea_to_jira_answer_field",
         label: "Answer a discovered Jira field",
@@ -661,10 +696,7 @@ const plugin = {
     }, { name: "idea_to_jira_answer_field" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !isActiveCreator(activeRuntime, requester.context)) return null;
+      if (!registerForRequester(toolContext, { activeCreator: true, jira: true })) return null;
       return {
         name: "idea_to_jira_preview_issue",
         label: "Preview exact Jira issue",
@@ -681,10 +713,7 @@ const plugin = {
     }, { name: "idea_to_jira_preview_issue" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !isActiveCreator(activeRuntime, requester.context)) return null;
+      if (!registerForRequester(toolContext, { activeCreator: true, jira: true })) return null;
       return {
         name: "idea_to_jira_confirm_issue",
         label: "Confirm exact Jira preview",
@@ -701,10 +730,7 @@ const plugin = {
     }, { name: "idea_to_jira_confirm_issue" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime || !activeRuntime.jiraWorkflow) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !isActiveCreator(activeRuntime, requester.context)) return null;
+      if (!registerForRequester(toolContext, { activeCreator: true, jira: true })) return null;
       return {
         name: "idea_to_jira_create_issue",
         label: "Create confirmed Jira issue",
@@ -721,10 +747,7 @@ const plugin = {
     }, { name: "idea_to_jira_create_issue" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok || !isConversationAllowed(activeRuntime, requester.context)) return null;
+      if (!registerForRequester(toolContext)) return null;
       return {
         name: "idea_to_jira_request_access",
         label: "Request Creator access",

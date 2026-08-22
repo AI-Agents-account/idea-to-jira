@@ -5,6 +5,7 @@ import type { AccessService } from "../src/access/access-service.js";
 import type { SqliteAuditWriter } from "../src/audit/index.js";
 import {
   beginServiceRuntime,
+  createDraftToolExecutionRuntimeBoundary,
   createServiceRuntimeCandidate,
   createServiceRuntimeGeneration,
   failServiceRuntime,
@@ -103,4 +104,58 @@ test("candidate construction closes opened storage and never publishes partial s
   assert.ok(candidate.accessService);
   assert.ok(candidate.draftService);
   assert.equal(closeCount, 1);
+});
+
+test("Draft tool-discovery boundary excludes Jira, shares rate state, and closes the final lease", () => {
+  resetServiceRuntimeForTest();
+  let openCount = 0;
+  let closeCount = 0;
+  let jiraFactoryCalls = 0;
+  const factories = {
+    openDatabase: () => {
+      openCount += 1;
+      return {
+        repositories: {},
+        close() { closeCount += 1; },
+      } as unknown as PluginDatabase;
+    },
+    createAuditWriter: () => ({}) as SqliteAuditWriter,
+    createAccessService: () => ({}) as AccessService,
+    createDraftService: () => ({}) as IdeaToJiraDraftService,
+    createJiraWorkflow: () => {
+      jiraFactoryCalls += 1;
+      return undefined;
+    },
+  };
+  const boundary = createDraftToolExecutionRuntimeBoundary(effectiveConfig(), factories);
+
+  const first = boundary.acquire();
+  const overlapping = boundary.acquire();
+  assert.equal(first.runtime, overlapping.runtime);
+  assert.equal(openCount, 1);
+  assert.equal(first.runtime.jiraWorkflow, undefined);
+  assert.equal(jiraFactoryCalls, 0);
+
+  first.release();
+  assert.equal(closeCount, 0);
+  overlapping.release();
+  overlapping.release();
+  assert.equal(closeCount, 1);
+
+  const sequential = boundary.acquire();
+  assert.notEqual(sequential.runtime, first.runtime);
+  assert.equal(sequential.runtime.limiter, first.runtime.limiter);
+  sequential.release();
+  assert.equal(closeCount, 2);
+
+  const generation = createServiceRuntimeGeneration();
+  const gatewayRuntime = { marker: "gateway" } as unknown as RuntimeServices;
+  assert.equal(beginServiceRuntime(generation), true);
+  assert.equal(publishServiceRuntime(generation, gatewayRuntime), true);
+  const borrowed = boundary.acquire();
+  assert.equal(borrowed.runtime, gatewayRuntime);
+  borrowed.release();
+  assert.equal(closeCount, 2, "a borrowed Gateway runtime must never be closed by discovery");
+  assert.equal(openCount, 2);
+  assert.equal(stopServiceRuntime(generation), true);
 });

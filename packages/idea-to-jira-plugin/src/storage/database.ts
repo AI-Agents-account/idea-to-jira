@@ -27,6 +27,8 @@ export interface OpenPluginDatabaseOptions {
   readonly migrationRegistry?: readonly Migration[];
   /** Existing verified online snapshot required before upgrading a non-empty database. */
   readonly upgradeBackupPath?: string;
+  /** Tool execution may open only an existing database at the exact current schema. */
+  readonly migrationMode?: "migrate" | "verify-current";
 }
 
 interface DefensiveDatabaseSync extends DatabaseSync {
@@ -69,6 +71,7 @@ function validateOptions(options: OpenPluginDatabaseOptions): {
   readonly busyTimeoutMs: number;
   readonly registry: readonly Migration[];
   readonly upgradeBackupPath: string | undefined;
+  readonly migrationMode: "migrate" | "verify-current";
 } {
   const filename = options.databaseFilename ?? DATABASE_FILENAME;
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(filename) || filename.includes("..")) {
@@ -86,6 +89,7 @@ function validateOptions(options: OpenPluginDatabaseOptions): {
     busyTimeoutMs,
     registry: options.migrationRegistry ?? migrations,
     upgradeBackupPath: options.upgradeBackupPath,
+    migrationMode: options.migrationMode ?? "migrate",
   };
 }
 
@@ -117,10 +121,16 @@ function verifyUpgradeBackup(
 
 export function openPluginDatabase(options: OpenPluginDatabaseOptions): PluginDatabase {
   const validated = validateOptions(options);
-  ensurePrivateStateDirectory(options.stateDir);
-  assertPrivateDirectory(options.stateDir);
-  assertExistingSqliteFileSet(validated.path);
-  preparePrivateDatabaseFile(validated.path);
+  if (validated.migrationMode === "migrate") {
+    ensurePrivateStateDirectory(options.stateDir);
+    assertPrivateDirectory(options.stateDir);
+    assertExistingSqliteFileSet(validated.path);
+    preparePrivateDatabaseFile(validated.path);
+  } else {
+    assertPrivateDirectory(options.stateDir);
+    assertExistingSqliteFileSet(validated.path);
+    assertPrivateFile(validated.path);
+  }
 
   const database = new DatabaseSync(validated.path, {
     enableForeignKeyConstraints: true,
@@ -132,16 +142,24 @@ export function openPluginDatabase(options: OpenPluginDatabaseOptions): PluginDa
   try {
     configureConnection(database, validated.busyTimeoutMs);
     const migrationState = inspectMigrationState(database, validated.registry);
-    if (!migrationState.fresh && migrationState.pending > 0) {
-      if (!validated.upgradeBackupPath) throw new Error("STORAGE_UPGRADE_BACKUP_REQUIRED");
-      verifyUpgradeBackup(
-        validated.upgradeBackupPath,
-        validated.path,
-        migrationState.currentVersion,
-        validated.registry,
-      );
+    let schemaVersion: number;
+    if (validated.migrationMode === "verify-current") {
+      if (migrationState.fresh || migrationState.pending !== 0 || migrationState.currentVersion !== migrationState.targetVersion) {
+        throw new Error("STORAGE_SCHEMA_NOT_CURRENT");
+      }
+      schemaVersion = migrationState.currentVersion;
+    } else {
+      if (!migrationState.fresh && migrationState.pending > 0) {
+        if (!validated.upgradeBackupPath) throw new Error("STORAGE_UPGRADE_BACKUP_REQUIRED");
+        verifyUpgradeBackup(
+          validated.upgradeBackupPath,
+          validated.path,
+          migrationState.currentVersion,
+          validated.registry,
+        );
+      }
+      schemaVersion = runMigrations(database, validated.registry);
     }
-    const schemaVersion = runMigrations(database, validated.registry);
     // Node 24.19 exposes this API; the pinned 24.3 type package predates its declaration.
     (database as DefensiveDatabaseSync).enableDefensive(true);
     enforceSqliteFileModes(validated.path);

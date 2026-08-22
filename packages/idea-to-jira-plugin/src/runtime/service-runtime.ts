@@ -42,6 +42,23 @@ export interface RuntimeServiceFactories {
   readonly createJiraWorkflow?: (storage: PluginDatabase, config: EffectiveConfig) => JiraWorkflowService | undefined;
 }
 
+export interface RuntimeCandidateOptions {
+  /** A registration-scoped limiter can be shared across short-lived tool executions. */
+  readonly limiter?: TokenBucketRateLimiter;
+  /** Execution-only runtimes must never create or migrate Gateway-owned storage. */
+  readonly migrationMode?: "migrate" | "verify-current";
+}
+
+export interface RuntimeExecutionLease {
+  readonly runtime: RuntimeServices;
+  /** Idempotently releases only resources owned by this lease's boundary. */
+  release(): void;
+}
+
+export interface DraftToolExecutionRuntimeBoundary {
+  acquire(): RuntimeExecutionLease;
+}
+
 interface RuntimeRecord {
   readonly generation: number;
   readonly instanceId: string;
@@ -116,17 +133,19 @@ function slot(): RuntimeSlot {
 export function createServiceRuntimeCandidate(
   config: EffectiveConfig,
   factories: RuntimeServiceFactories = defaultFactories,
+  options: RuntimeCandidateOptions = {},
 ): RuntimeServices {
   let storage: PluginDatabase | undefined;
   try {
     storage = factories.openDatabase({
       stateDir: config.stateDir,
       upgradeBackupPath: join(config.stateDir, UPGRADE_BACKUP_FILENAME),
+      migrationMode: options.migrationMode ?? "migrate",
     });
     const auditWriter = factories.createAuditWriter();
     const accessService = factories.createAccessService(storage, config);
     const draftService = factories.createDraftService(storage, config);
-    const limiter = new TokenBucketRateLimiter(config.limits);
+    const limiter = options.limiter ?? new TokenBucketRateLimiter(config.limits);
     const jiraWorkflow = factories.createJiraWorkflow?.(storage, config);
     jiraWorkflow?.recoverAfterRestart();
     return Object.freeze({ config, storage, auditWriter, accessService, draftService, limiter, ...(jiraWorkflow ? { jiraWorkflow } : {}) });
@@ -138,6 +157,55 @@ export function createServiceRuntimeCandidate(
     }
     throw error;
   }
+}
+
+/**
+ * Creates the Draft-only execution boundary used by OpenClaw's
+ * `tool-discovery` mode. Plugin registration stays side-effect free. Tool
+ * execution borrows an already READY Gateway runtime when present; otherwise
+ * it opens one short-lived runtime without constructing Jira. The final lease
+ * closes owned storage. The registration-scoped limiter outlives individual
+ * leases so sequential calls cannot reset rate limits.
+ */
+export function createDraftToolExecutionRuntimeBoundary(
+  config: EffectiveConfig,
+  factories: RuntimeServiceFactories = defaultFactories,
+): DraftToolExecutionRuntimeBoundary {
+  const limiter = new TokenBucketRateLimiter(config.limits);
+  const draftOnlyFactories: RuntimeServiceFactories = {
+    ...factories,
+    createJiraWorkflow: () => undefined,
+  };
+  let ownedRuntime: RuntimeServices | undefined;
+  let leases = 0;
+
+  return Object.freeze({
+    acquire(): RuntimeExecutionLease {
+      const serviceRuntime = getServiceRuntime();
+      if (serviceRuntime) {
+        return Object.freeze({ runtime: serviceRuntime, release() {} });
+      }
+
+      ownedRuntime ??= createServiceRuntimeCandidate(config, draftOnlyFactories, {
+        limiter,
+        migrationMode: "verify-current",
+      });
+      const runtime = ownedRuntime;
+      leases += 1;
+      let released = false;
+      return Object.freeze({
+        runtime,
+        release(): void {
+          if (released) return;
+          released = true;
+          leases -= 1;
+          if (leases !== 0 || ownedRuntime !== runtime) return;
+          ownedRuntime = undefined;
+          runtime.storage.close();
+        },
+      });
+    },
+  });
 }
 
 /** Allocates a process-local, non-sensitive lifecycle generation. */

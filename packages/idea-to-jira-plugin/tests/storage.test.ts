@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   statSync,
@@ -409,6 +410,42 @@ test("future and partially recorded schema versions fail closed", () => {
     (error) => error instanceof MigrationError && error.code === "MIGRATION_PARTIAL_STATE",
   );
   partial.close();
+});
+
+test("verify-current opens only an existing exact schema and never creates or migrates storage", () => {
+  const missingRoot = mkdtempSync(join(tmpdir(), "idea-to-jira-verify-missing-"));
+  const missingState = join(missingRoot, "state");
+  assert.throws(
+    () => openPluginDatabase({ stateDir: missingState, migrationMode: "verify-current" }),
+  );
+  assert.equal(existsSync(missingState), false);
+
+  const stateDir = stateDirectory("verify-current");
+  const gatewayStorage = openPluginDatabase({ stateDir });
+  gatewayStorage.close();
+
+  const sixthMigration = defineMigration(6, "execution_must_not_migrate", "CREATE TABLE execution_must_not_migrate(id INTEGER PRIMARY KEY) STRICT;");
+  assert.throws(
+    () => openPluginDatabase({
+      stateDir,
+      migrationRegistry: [...migrations, sixthMigration],
+      migrationMode: "verify-current",
+    }),
+    /STORAGE_SCHEMA_NOT_CURRENT/,
+  );
+
+  const inspection = new DatabaseSync(join(stateDir, DATABASE_FILENAME), { readOnly: true });
+  const userVersion = inspection.prepare("PRAGMA user_version").get() as { user_version: number };
+  const marker = inspection.prepare(
+    "SELECT count(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'execution_must_not_migrate'",
+  ).get() as { count: number };
+  inspection.close();
+  assert.equal(userVersion.user_version, migrations.length);
+  assert.equal(marker.count, 0);
+
+  const executionStorage = openPluginDatabase({ stateDir, migrationMode: "verify-current" });
+  assert.equal(executionStorage.health.schemaVersion, migrations.length);
+  executionStorage.close();
 });
 
 test("non-empty schema upgrade requires and verifies a consistent pre-upgrade backup", async () => {

@@ -49,6 +49,28 @@ The plugin manifest and agent allowlist contain exactly:
 
 Patch accepts only the declared domain fields, `expectedVersion`, typed provenance and optional evidence references. Unknown properties, arbitrary Jira JSON and client-supplied identity are rejected. Jira create is absent from the tool graph.
 
+### OpenClaw tool-discovery execution
+
+Normal `registrationMode: "full"` keeps the existing service-owned runtime,
+hooks, commands and Gateway status method. `registrationMode: "tool-discovery"`
+does not register those channel/runtime surfaces. For a valid host-derived
+Telegram tool context, its factories publish the four callable Draft schemas
+without opening SQLite, running migrations, constructing Jira clients or
+starting timers. Malformed host contexts receive no schema. The access-request
+and Jira tools are not published by this mode.
+
+A discovered Draft tool executes through a bounded Draft-only runtime lease.
+The lease borrows a READY Gateway runtime when one exists; otherwise it opens
+only the existing configured SQLite database after verifying the exact current
+schema version. It never creates or migrates storage, and closes owned storage
+when the final overlapping call ends. It never constructs or starts the Jira workflow and shares
+one registration-scoped rate limiter across sequential calls. Execution
+revalidates the host-derived Telegram requester and current conversation RBAC,
+then enforces payload/create gates, mandatory security audit, owner checks and
+Draft CAS rules. Guest, malformed, cross-route and stale-role callers therefore
+fail closed even though schema discovery itself is non-activating. Tool input
+remains unable to supply identity.
+
 ## Validation and formatting
 
 Content is normalized and bounded before persistence:

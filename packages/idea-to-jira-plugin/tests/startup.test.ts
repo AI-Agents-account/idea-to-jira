@@ -8,6 +8,25 @@ import type {
 
 import plugin from "../src/index.js";
 
+test("invalid tool-discovery config registers no lifecycle surfaces", () => {
+  const errors: string[] = [];
+  const api = {
+    registrationMode: "tool-discovery",
+    pluginConfig: {},
+    logger: {
+      error(message: string) { errors.push(message); },
+    },
+    on() { assert.fail("tool discovery must not register hooks"); },
+    registerTool() { assert.fail("invalid discovery config must not register tools"); },
+    registerService() { assert.fail("tool discovery must not register services"); },
+    registerCommand() { assert.fail("tool discovery must not register commands"); },
+    registerGatewayMethod() { assert.fail("tool discovery must not register gateway methods"); },
+  } as unknown as OpenClawPluginApi;
+
+  plugin.register(api);
+  assert.deepEqual(errors, ["idea-to-jira tool discovery disabled code=CONFIG_INVALID"]);
+});
+
 test("invalid startup config installs a fail-closed diagnostic gate and no tool", () => {
   const errors: string[] = [];
   const agentHooks: Array<() => PluginHookBeforeAgentRunResult> = [];
