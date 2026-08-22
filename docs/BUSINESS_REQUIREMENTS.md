@@ -1,5 +1,8 @@
 # Бизнес-требования: Idea-to-Jira MVP
 
+> Обновление 2026-08-21: D-026—D-029 и `JIRA_CREATE_CONTRACT.md` v2 supersede fixed Jira IDs/fields, Catalog-first search и automatic no-preview create. Jira URL/project/type/JQL/search fields задаются deployment config; metadata динамическая; перед POST есть preview/confirmation.
+
+
 **Статус:** актуальная базовая версия для MVP
 **Версия:** 1.0
 **Дата:** 2026-08-20
@@ -250,22 +253,13 @@ Preview и отдельная кнопка create отсутствуют.
 - автоматический retry POST после `UNKNOWN`;
 - отдельный прикладной backend вне OpenClaw plugin.
 
-## 8. Бизнес-обязательные данные Feature
+## 8. Бизнес-обязательные данные Jira issue
 
-Для create обязательны:
+Deployment config задаёт Jira URL, project key, issue-type name, fixed JQL и список полей существующих задач, разрешённых для bounded context. Numeric Jira IDs и custom-field IDs не являются бизнес-контрактом.
 
-- project `FPF`, id `18100`;
-- issue type `Feature`, id `11500`;
-- `summary`;
-- содержательный `description` по бизнес-шаблону;
-- `Marketing Required` (`customfield_16203`);
-- `Category` (`customfield_13200`);
-- `Moscow` (`customfield_15204`);
-- `Impacted Metrics` (`customfield_14902`).
+При startup/refresh plugin получает create metadata и динамически определяет required fields, defaults, schemas и options. `summary` и содержательный `description` формируются из Draft. Остальные required fields запрашиваются у пользователя generic metadata-driven flow; unsupported/ambiguous field блокирует create без догадок.
 
-Allowed options и техническая форма значений валидируются по Jira create metadata для Jira Server 11.3.8. Если обязательное значение неизвестно, система задаёт вопрос и не создаёт задачу.
-
-`assignee` и `reporter` в payload не передаются; assignee остаётся `unassigned` согласно стандартному поведению Jira.
+Перед POST показывается bounded preview и требуется подтверждение exact версии Draft/metadata/payload. `assignee`, `reporter`, transition и скрытый correlation marker автоматически не передаются.
 
 ## 9. Показатели пилота
 

@@ -22,6 +22,11 @@
             "idea_to_jira_read_draft",
             "idea_to_jira_patch_draft",
             "idea_to_jira_cancel_draft",
+            "idea_to_jira_search_duplicates",
+            "idea_to_jira_answer_field",
+            "idea_to_jira_preview_issue",
+            "idea_to_jira_confirm_issue",
+            "idea_to_jira_create_issue",
             "idea_to_jira_request_access",
           ],
         },
@@ -35,6 +40,26 @@
   },
   session: {
     dmScope: "per-account-channel-peer",
+  },
+  commands: {
+    // Public users may invoke plugin commands that explicitly set
+    // `requireAuth: false` (notably /request_access). Native/text core-command
+    // surfaces are disabled; remaining directive/owner authorization is
+    // limited to the controlled operator identity.
+    native: false,
+    nativeSkills: false,
+    text: false,
+    bash: false,
+    config: false,
+    mcp: false,
+    plugins: false,
+    debug: false,
+    restart: false,
+    allowFrom: {
+      telegram: ["${TELEGRAM_PILOT_SENDER_ID}"],
+    },
+    ownerAllowFrom: ["telegram:${TELEGRAM_PILOT_SENDER_ID}"],
+    useAccessGroups: true,
   },
   bindings: [
     {
@@ -52,15 +77,15 @@
       // Use that same canonical account id so the env fallback cannot create a
       // second poller for the same bot token.
       defaultAccount: "default",
-      dmPolicy: "allowlist",
-      allowFrom: ["${TELEGRAM_PILOT_SENDER_ID}"],
+      dmPolicy: "open",
+      allowFrom: ["*"],
       groupPolicy: "disabled",
       accounts: {
         default: {
           enabled: true,
           botToken: "${TELEGRAM_BOT_TOKEN}",
-          dmPolicy: "allowlist",
-          allowFrom: ["${TELEGRAM_PILOT_SENDER_ID}"],
+          dmPolicy: "open",
+          allowFrom: ["*"],
           groupPolicy: "disabled",
         },
       },
@@ -83,25 +108,31 @@
           telegram: {
             channelId: "telegram",
             accountId: "default",
-            pilotSenderIdEnv: "TELEGRAM_PILOT_SENDER_ID",
             adminSenderIdsEnv: "BUSINESS_ADMIN_TELEGRAM_IDS",
           },
           notifications: {
             productOwnerSenderIdsEnv: "PRODUCT_OWNER_TELEGRAM_IDS",
           },
           jira: {
-            originEnv: "JIRA_BASE_URL",
-            tokenEnv: "JIRA_TOKEN",
-            projectKey: "FPF",
-            projectId: "18100",
+            enabled: true,
+            url: "${JIRA_BASE_URL}",
+            projectKey: "PROJECT",
             issueTypeName: "Feature",
-            issueTypeId: "11500",
-            writeMode: "disabled",
+            search: {
+              jql: 'project = "PROJECT" AND issuetype = "Feature" ORDER BY updated DESC',
+              fields: ["key", "summary", "description", "status", "labels", "components", "updated"],
+              maxResults: 50,
+              maxPages: 2,
+              timeoutMs: 10000,
+              maxContextBytes: 65536,
+            },
+            metadata: { refreshIntervalMinutes: 60 },
+            create: { requireConfirmation: true },
           },
           catalog: {
             path: "/app/knowledge/catalog.md",
             schemaVersion: 1,
-            sha256: "59fae2568168a4859458763ca08dbe9c5e35af81481553e336faec6cd3a2501b",
+            sha256: "eaf145543f4e4d0d157f5f9a965fbedbdedf8405e28ab7a63171d9c7b60a74ca",
           },
           sttModel: "medium",
           allowedTools: [
@@ -109,6 +140,11 @@
             "idea_to_jira_read_draft",
             "idea_to_jira_patch_draft",
             "idea_to_jira_cancel_draft",
+            "idea_to_jira_search_duplicates",
+            "idea_to_jira_answer_field",
+            "idea_to_jira_preview_issue",
+            "idea_to_jira_confirm_issue",
+            "idea_to_jira_create_issue",
             "idea_to_jira_request_access",
           ],
           limits: {

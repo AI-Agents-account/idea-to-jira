@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { AccessService } from "../access/access-service.js";
 import { SqliteAuditWriter } from "../audit/index.js";
 import type { EffectiveConfig } from "../config.js";
 import type { SafeErrorCode } from "../errors/index.js";
+import { JiraHttpClient } from "../jira/http-client.js";
+import { JiraMetadataClient } from "../jira/metadata-client.js";
+import { JiraWorkflowPersistence } from "../jira/persistence.js";
+import { JiraPostingService } from "../jira/posting-service.js";
+import { JiraSearchClient } from "../jira/search-client.js";
+import { JiraWorkflowService } from "../jira/workflow-service.js";
 import { TokenBucketRateLimiter } from "./policy.js";
 import {
   openPluginDatabase,
@@ -24,6 +31,7 @@ export interface RuntimeServices {
   readonly accessService: AccessService;
   readonly draftService: IdeaToJiraDraftService;
   readonly limiter: TokenBucketRateLimiter;
+  readonly jiraWorkflow?: JiraWorkflowService;
 }
 
 export interface RuntimeServiceFactories {
@@ -31,6 +39,30 @@ export interface RuntimeServiceFactories {
   readonly createAuditWriter: () => SqliteAuditWriter;
   readonly createAccessService: (storage: PluginDatabase, config: EffectiveConfig) => AccessService;
   readonly createDraftService: (storage: PluginDatabase, config: EffectiveConfig) => IdeaToJiraDraftService;
+  readonly createJiraWorkflow?: (storage: PluginDatabase, config: EffectiveConfig) => JiraWorkflowService | undefined;
+}
+
+export interface RuntimeCandidateOptions {
+  /** A registration-scoped limiter can be shared across short-lived tool executions. */
+  readonly limiter?: TokenBucketRateLimiter;
+  /** Execution-only runtimes must never create or migrate Gateway-owned storage. */
+  readonly migrationMode?: "migrate" | "verify-current";
+}
+
+export interface RuntimeExecutionLease {
+  readonly runtime: RuntimeServices;
+  /** Idempotently releases only resources owned by this lease's boundary. */
+  release(): void;
+}
+
+export type DraftToolExecutionPolicy = Pick<RuntimeServices, "config" | "limiter">;
+
+export interface DraftToolExecutionRuntimeBoundary {
+  /**
+   * Runs policy preflight against the runtime this lease will use. When no
+   * Gateway runtime is READY, preflight runs before execution storage opens.
+   */
+  acquire(preflight: (policy: DraftToolExecutionPolicy) => void): RuntimeExecutionLease;
 }
 
 interface RuntimeRecord {
@@ -72,6 +104,29 @@ const defaultFactories: RuntimeServiceFactories = Object.freeze({
     unitOfWork: storage.repositories,
     maxActiveDrafts: config.limits.activeDrafts,
   }),
+  createJiraWorkflow: (storage: PluginDatabase, config: EffectiveConfig) => {
+    let token = process.env.JIRA_TOKEN?.trim();
+    if (!token && process.env.JIRA_TOKEN_FILE?.trim()) {
+      try {
+        const tokenPath = process.env.JIRA_TOKEN_FILE.trim();
+        const tokenStat = statSync(tokenPath);
+        token = tokenStat.isFile() && (tokenStat.mode & 0o077) === 0 ? readFileSync(tokenPath, "utf8").trim() : undefined;
+      } catch { token = undefined; }
+    }
+    if (!token || token.length > 8_192 || /[\u0000-\u0020\u007f]/.test(token)) token = undefined;
+    if (!config.jira.enabled || !config.jira.credentialAvailable || !token) return undefined;
+    const http = new JiraHttpClient({
+      origin: config.jira.url,
+      token,
+      timeoutMs: config.jira.search.timeoutMs,
+      maxResponseBytes: Math.max(2_097_152, config.jira.search.maxContextBytes * 4),
+    });
+    const metadata = new JiraMetadataClient({ config: config.jira, http });
+    const search = new JiraSearchClient(config.jira, http);
+    const posting = new JiraPostingService(storage.repositories, config.jira, http);
+    const persistence = new JiraWorkflowPersistence(storage.repositories);
+    return new JiraWorkflowService(config.jira, metadata, search, posting, persistence);
+  },
 });
 
 function slot(): RuntimeSlot {
@@ -84,18 +139,22 @@ function slot(): RuntimeSlot {
 export function createServiceRuntimeCandidate(
   config: EffectiveConfig,
   factories: RuntimeServiceFactories = defaultFactories,
+  options: RuntimeCandidateOptions = {},
 ): RuntimeServices {
   let storage: PluginDatabase | undefined;
   try {
     storage = factories.openDatabase({
       stateDir: config.stateDir,
       upgradeBackupPath: join(config.stateDir, UPGRADE_BACKUP_FILENAME),
+      migrationMode: options.migrationMode ?? "migrate",
     });
     const auditWriter = factories.createAuditWriter();
     const accessService = factories.createAccessService(storage, config);
     const draftService = factories.createDraftService(storage, config);
-    const limiter = new TokenBucketRateLimiter(config.limits);
-    return Object.freeze({ config, storage, auditWriter, accessService, draftService, limiter });
+    const limiter = options.limiter ?? new TokenBucketRateLimiter(config.limits);
+    const jiraWorkflow = factories.createJiraWorkflow?.(storage, config);
+    jiraWorkflow?.recoverAfterRestart();
+    return Object.freeze({ config, storage, auditWriter, accessService, draftService, limiter, ...(jiraWorkflow ? { jiraWorkflow } : {}) });
   } catch (error) {
     try {
       storage?.close();
@@ -104,6 +163,75 @@ export function createServiceRuntimeCandidate(
     }
     throw error;
   }
+}
+
+/**
+ * Creates the Draft-only execution boundary used by OpenClaw's
+ * `tool-discovery` mode. Plugin registration stays side-effect free. Tool
+ * execution borrows an already READY Gateway runtime when present; otherwise
+ * it opens one short-lived runtime without constructing Jira. The final lease
+ * closes owned storage. The registration-scoped limiter outlives individual
+ * leases so sequential calls cannot reset rate limits.
+ */
+export function createDraftToolExecutionRuntimeBoundary(
+  config: EffectiveConfig,
+  factories: RuntimeServiceFactories = defaultFactories,
+): DraftToolExecutionRuntimeBoundary {
+  const limiter = new TokenBucketRateLimiter(config.limits);
+  const draftOnlyFactories: RuntimeServiceFactories = {
+    ...factories,
+    createJiraWorkflow: () => undefined,
+  };
+  let ownedRuntime: RuntimeServices | undefined;
+  let leases = 0;
+  let closeFailure: unknown;
+  const registrationPolicy: DraftToolExecutionPolicy = Object.freeze({ config, limiter });
+
+  return Object.freeze({
+    acquire(preflight: (policy: DraftToolExecutionPolicy) => void): RuntimeExecutionLease {
+      // Every discovery registration owns one limiter. Apply it even when a
+      // READY Gateway runtime is borrowed so switching runtime sources cannot
+      // reset or bypass this registration's abuse boundary.
+      preflight(registrationPolicy);
+      const serviceRuntime = getServiceRuntime();
+      if (serviceRuntime) {
+        // The live runtime may have tighter policy than the discovery copy.
+        // Enforce both snapshots, but do not consume the same limiter twice.
+        if (serviceRuntime.config !== config || serviceRuntime.limiter !== limiter) {
+          preflight(serviceRuntime);
+        }
+        return Object.freeze({ runtime: serviceRuntime, release() {} });
+      }
+
+      // A failed final close leaves at most this one retained runtime. Refuse
+      // to open additional connections rather than turning repeated calls
+      // into an unbounded resource leak.
+      if (closeFailure !== undefined) throw closeFailure;
+      ownedRuntime ??= createServiceRuntimeCandidate(config, draftOnlyFactories, {
+        limiter,
+        migrationMode: "verify-current",
+      });
+      const runtime = ownedRuntime;
+      leases += 1;
+      let released = false;
+      return Object.freeze({
+        runtime,
+        release(): void {
+          if (released) return;
+          released = true;
+          leases -= 1;
+          if (leases !== 0 || ownedRuntime !== runtime) return;
+          try {
+            runtime.storage.close();
+            ownedRuntime = undefined;
+          } catch (error) {
+            closeFailure = error;
+            throw error;
+          }
+        },
+      });
+    },
+  });
 }
 
 /** Allocates a process-local, non-sensitive lifecycle generation. */

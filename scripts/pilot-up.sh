@@ -58,7 +58,8 @@ for forbidden_key in JIRA_TOKEN OPENAI_API_KEY; do
   fi
 done
 
-mkdir -p data/config data/state data/workspace data/plugin-state data/auth-profile-secrets
+mkdir -p data/config data/state data/workspace data/plugin-state data/auth-profile-secrets data/secrets
+chmod 700 data/secrets
 # The runtime config is a generated deployment artifact. Refresh it from the
 # reviewed template on every launch so an earlier pilot run cannot retain stale
 # bindings or plugin settings. The template contains references, not secrets.
@@ -199,7 +200,7 @@ fi
 printf '%s\n' "pilot-up: verifying live-local boundaries"
 compose exec -T "$GATEWAY_SERVICE" node /app/scripts/healthcheck.mjs
 compose exec -T "$GATEWAY_SERVICE" node /app/scripts/pilot-readiness.mjs
-compose exec -T "$GATEWAY_SERVICE" node /app/scripts/create-readiness.mjs --expect-disabled
+compose exec -T "$GATEWAY_SERVICE" node /app/scripts/create-readiness.mjs --verify-contract
 
 trap - EXIT
 printf '%s\n' "pilot-up: ready; Gateway is running on the configured loopback port"

@@ -1,12 +1,14 @@
 # Stage-05A controlled Telegram DM text pilot runbook
 
-**Scope:** one dedicated bot/account, one trusted numeric sender, text messages only, Stages 01–05. This runbook does not authorize Jira traffic, a broad beta, voice, groups, or production go-live.
+**Scope:** one dedicated bot/account with public numeric private-DM access requests, a controlled operator for admin/owner-directive smoke, text messages only, Stages 01–05. This runbook does not authorize Jira traffic, unrestricted model access, voice, groups, or production go-live.
 
 ## Safety invariants
 
-- Keep `dmPolicy: "allowlist"`, `groupPolicy: "disabled"`, exact `TELEGRAM_PILOT_SENDER_ID`, peer-scoped sessions and the five-tool allowlist unchanged.
-- Do not set or inject `JIRA_TOKEN`. `JIRA_BASE_URL` may remain `https://jira.invalid`; no pilot step requires Jira.
-- `writeMode` must remain `disabled`; `jira_create`, generic HTTP, browser, exec, filesystem and arbitrary message tools must remain absent.
+- Keep channel and account `dmPolicy: "open"`, `allowFrom: ["*"]`, `groupPolicy: "disabled"`, peer-scoped sessions and the exact ten-tool allowlist unchanged.
+- Keep native/text core-command parsing and native skill menus disabled. Restrict any remaining directive/owner authorization through `commands.allowFrom.telegram` and `commands.ownerAllowFrom` to `TELEGRAM_PILOT_SENDER_ID`; keep bash/config/MCP/plugin/debug/restart command surfaces disabled.
+- Public admission means only typed `/request_access` is available before role approval. Guest free-form text must be blocked before the model with the fixed Russian `/request_access` instruction; Draft/Jira tools must not be exposed.
+- Do not put `JIRA_TOKEN` in `.env`. This text-only pilot leaves `data/secrets/jira-token` absent, so Jira tools remain unavailable while Draft continues to work.
+- Generic HTTP, browser, exec, filesystem and arbitrary message tools remain absent; Jira tools are conditionally exposed only when the runtime file-secret exists.
 - Catalog placeholder is not active evidence. Do not attempt duplicate, READY or create. A verified Catalog must precede all three in a future stage.
 - Stop on any unexpected sender/model/tool, storage/readiness failure, Draft mutation from non-text input, raw private payload in logs, or external Jira request.
 
@@ -35,13 +37,13 @@ Inspect the rendered Compose config without pasting output into the evidence rec
 docker compose --env-file .env config --quiet
 ```
 
-Confirm manually that `JIRA_TOKEN` is absent from `.env` and rendered container environment. Do not use a real Jira origin or credential to make readiness pass.
+Confirm manually that `JIRA_TOKEN` is absent from `.env` and rendered container environment and that `data/secrets/jira-token` is absent for this no-Jira pilot. Do not use a real Jira origin or credential to make readiness pass.
 
 ## 2. Prepare controlled runtime
 
 1. Create `.env` from `.env.example` outside review artifacts.
-2. Set a dedicated bot token, one numeric pilot sender ID, a new Gateway token, trusted admin/PO numeric routes, and a reviewed `OPENAI_MODEL=openai/<available-model>`. For this one-actor pilot, include the same pilot ID in `BUSINESS_ADMIN_TELEGRAM_IDS`; startup fails closed otherwise.
-3. Keep `JIRA_BASE_URL=https://jira.invalid`; do not add `JIRA_TOKEN`.
+2. Set a dedicated bot token, one numeric controlled operator ID, a new Gateway token, trusted admin/PO numeric routes, and a reviewed `OPENAI_MODEL=openai/<available-model>`. Include `TELEGRAM_PILOT_SENDER_ID` in `BUSINESS_ADMIN_TELEGRAM_IDS`; it authorizes the controlled admin/owner-directive smoke, not public requester admission.
+3. Keep `JIRA_BASE_URL=https://jira.invalid`; do not add `JIRA_TOKEN` or `data/secrets/jira-token`.
 4. Create private persistent mounts:
 
 ```bash
@@ -64,7 +66,7 @@ After Technical Owner approval, the preferred launch is one fail-closed command:
 ./scripts/pilot-up.sh
 ```
 
-The operator host needs Docker and Docker Compose v2 only; Node.js/npm are not launch prerequisites. Compose injects the complete `.env` into the container. Before container creation, the launcher rejects `JIRA_TOKEN` and `OPENAI_API_KEY`; after image build, the Node-enabled container validates the complete injected environment. The image entrypoint repeats the forbidden-credential gate so direct Compose startup cannot bypass it. If no persisted OpenAI OAuth profile exists, the launcher starts an interactive device-code login in the raised Gateway container, persists the profile in the mounted state/secret directories, restarts the Gateway and continues readiness checks. On any startup/readiness failure it stops the Gateway. Development `scripts/preflight.sh` remains a separate source/CI gate for reviewed revisions.
+The operator host needs Docker and Docker Compose v2 only; Node.js/npm are not launch prerequisites. Compose uses `.env` for interpolation and injects only the explicit runtime allowlist from `compose.yaml`. Before container creation, the launcher rejects `JIRA_TOKEN` and `OPENAI_API_KEY`; after image build, the Node-enabled container validates the injected environment. The image entrypoint repeats the forbidden-inline-credential gate so direct Compose startup cannot bypass it. If no persisted OpenAI OAuth profile exists, the launcher starts an interactive device-code login in the raised Gateway container, persists the profile in the mounted state/secret directories, restarts the Gateway and continues readiness checks. On any startup/readiness failure it stops the Gateway. Development `scripts/preflight.sh` remains a separate source/CI gate for reviewed revisions.
 
 The equivalent manual readiness commands are:
 
@@ -80,22 +82,24 @@ Expected final readiness fields: `status=ready mode=live-local`, `runtime=ready`
 Also confirm create readiness remains closed:
 
 ```bash
-docker compose exec openclaw-gateway node /app/scripts/create-readiness.mjs --expect-disabled
+docker compose exec openclaw-gateway node /app/scripts/create-readiness.mjs --verify-contract
 ```
 
-Any non-zero pilot readiness is a stop. Fix configuration/auth/storage offline; never switch DM to open, add tools, provide Jira credentials, or bypass checks.
+Any non-zero pilot readiness is a stop. Fix configuration/auth/storage offline; never enable groups, broaden core-command authorization, add tools, provide Jira credentials, or bypass checks.
 
 ## 4. Controlled Telegram smoke
 
-The operator performs these steps from the exact allowlisted Telegram user in a direct chat with the dedicated bot. Use synthetic, non-sensitive idea text.
+Use two operator-controlled Telegram accounts when available: a non-admin public requester and the controlled Business Admin. All traffic must be private DM with the dedicated bot and use synthetic, non-sensitive text.
 
-1. **Context/boundary:** send one harmless text greeting. Verify the response comes from agent `idea-mvp` on the single Telegram account `default`; inspect sanitized logs only for pass/fail codes, not content.
-2. **RBAC:** request access through the implemented command/tool flow. Verify a pending request and an allowlisted admin decision; repeat the same decision to prove anti-replay/stale rejection.
-3. **Draft create:** send synthetic text sufficient to create a Draft. Record only redacted Draft reference and version `1`.
-4. **Read/patch:** read the same Draft, apply one meaningful text update with expected version, and verify version increments exactly once.
-5. **CAS:** attempt a second patch using the stale prior version. Verify conflict and no overwrite.
-6. **Ownership/destination:** do not add a second actor to the allowlist. From any non-allowlisted account used by the operator's security test, the bot must not reach model/tool mutation. Stop if it does.
-7. **Cancel (optional final mutation):** cancel with the current version and verify immutable history/current state.
+1. **Guest pre-model gate:** from the non-admin requester, send one harmless free-form greeting. Verify the fixed Russian denial names `/request_access`, no model response is produced, and no Draft/Jira tool runs.
+2. **Public typed request:** send `/request_access` from that same requester. Verify a `PENDING` request is created without model execution and only configured Business Admin destinations receive the content-free card. Repeat `/request_access`; verify the same current status is returned and no second request/card is created.
+3. **Core-command/directive boundary:** from the requester, send one harmless core command and one harmless directive-only test approved for the window. Verify neither executes and neither bypasses the Guest pre-model gate. Native/text core commands stay disabled for every sender; if the smoke window includes a remaining owner-directive check, perform it only from the controlled operator.
+4. **RBAC:** approve through `/access` from the controlled Business Admin. From the requester, attempt a mutating `/access` action with synthetic invalid data and verify no admin transition usage/details are disclosed. Repeat the admin decision to prove anti-replay/stale rejection.
+5. **Draft create:** after approval, send synthetic text sufficient to create a Draft. Record only redacted Draft reference and version `1`.
+6. **Read/patch:** read the same Draft, apply one meaningful text update with expected version, and verify version increments exactly once.
+7. **CAS:** attempt a second patch using the stale prior version. Verify conflict and no overwrite.
+8. **Identity/destination:** from a third unapproved numeric private-DM account, verify `/request_access` reaches only `PENDING` while free-form text remains model/tool blocked. Stop if any group/topic, destination mismatch, username claim, or unapproved account reaches model/tool mutation.
+9. **Cancel (optional final mutation):** cancel with the current version and verify immutable history/current state.
 
 Do not send real business content, links requiring fetch, files, photos, voice, Jira keys or credentials.
 
@@ -149,7 +153,7 @@ Closeout decision: `continue controlled pilot`, `fix and repeat`, or `close pilo
 
 ## Current blockers before a real smoke
 
-- real dedicated Telegram bot token and exact numeric pilot sender ID;
+- real dedicated Telegram bot token, controlled operator ID and preferably a separate non-admin requester account;
 - reviewed available `openai/*` model and valid mounted auth profile;
 - reviewed OpenClaw image digest/release evidence, writable private mounts and restart window;
 - explicit authorization for external Telegram/OpenAI activity;

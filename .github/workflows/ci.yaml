@@ -27,7 +27,7 @@ jobs:
       - name: Build plugin
         run: npm run build
       - name: Verify create readiness is fail-closed
-        run: npm run verify:create-disabled
+        run: npm run verify:create-contract
       - name: Verify Stage-05A pilot structure without external calls
         env:
           HOME: ${{ runner.temp }}/idea-to-jira-pilot-validation

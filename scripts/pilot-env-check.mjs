@@ -68,6 +68,7 @@ try {
   const botToken = values.get("TELEGRAM_BOT_TOKEN");
   if (!/^[1-9][0-9]{4,19}:[A-Za-z0-9_-]{20,}$/u.test(botToken)) stop("TELEGRAM_TOKEN_INVALID");
 
+  // This is the controlled smoke/core-command operator, not the public DM allowlist.
   const sender = values.get("TELEGRAM_PILOT_SENDER_ID");
   if (!/^[1-9][0-9]{4,19}$/u.test(sender)) stop("PILOT_ACTOR_INVALID");
 

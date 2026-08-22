@@ -18,7 +18,7 @@
     "check": "npm run lint && npm run test",
     "validate:json": "node scripts/validate-json.mjs",
     "readiness:create": "node scripts/create-readiness.mjs",
-    "verify:create-disabled": "node scripts/create-readiness.mjs --expect-disabled",
+    "verify:create-contract": "node scripts/create-readiness.mjs --verify-contract",
     "readiness:pilot": "node scripts/pilot-readiness.mjs",
     "verify:pilot-structure": "node scripts/pilot-readiness.mjs --structural",
     "verify:pilot-env": "node scripts/pilot-env-check.mjs .env",

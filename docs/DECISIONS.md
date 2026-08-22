@@ -1,8 +1,8 @@
 # Решения проекта Idea-to-Jira MVP
 
 **Статус:** журнал актуальных решений
-**Версия:** 1.0
-**Дата:** 2026-08-20
+**Версия:** 2.0
+**Дата:** 2026-08-21
 **Целевой контур:** production
 
 ## 1. Правило применения
@@ -22,12 +22,12 @@
 
 | ID | Решение | Статус |
 |---|---|---|
-| D-001 | В MVP нет отдельного Jira preview | ACCEPTED |
-| D-002 | В MVP нет кнопки/confirmation token create | ACCEPTED |
-| D-003 | Для Creator create автоматический после готовности и решения по дублю | ACCEPTED |
+| D-001 | В MVP нет отдельного Jira preview | SUPERSEDED by D-028 |
+| D-002 | В MVP нет кнопки/confirmation token create | SUPERSEDED by D-028 |
+| D-003 | Для Creator create автоматический после готовности и решения по дублю | SUPERSEDED by D-028 |
 | D-004 | Guest получает Creator только после admin approval trusted identity | ACCEPTED |
 | D-005 | Детали Jira-дублей доступны только Creator | ACCEPTED |
-| D-006 | Duplicate search: bounded Jira search + Catalog narrowing | ACCEPTED |
+| D-006 | Duplicate search: bounded Jira search + Catalog narrowing | SUPERSEDED by D-027 |
 | D-007 | Custom Jira correlation field недоступен | ACCEPTED |
 | D-008 | `UNKNOWN` без key — fail closed/manual reconciliation, без auto POST retry | ACCEPTED |
 | D-009 | Jira key/number обозначает только уже известную задачу | ACCEPTED |
@@ -39,14 +39,18 @@
 | D-015 | Выделенный Docker-контейнер с последним стабильным OpenClaw | ACCEPTED |
 | D-016 | Telegram route для PO принят | ACCEPTED |
 | D-017 | Для voice используется Whisper `medium`; ресурсы доступны | ACCEPTED |
-| D-018 | Jira Server 11.3.8, FPF id 18100, Feature id 11500 | ACCEPTED |
-| D-019 | Required Jira create fields подтверждены evidence | ACCEPTED |
+| D-018 | Jira Server и фиксированные numeric project/type IDs | SUPERSEDED by D-026 |
+| D-019 | Required Jira create fields подтверждены evidence | SUPERSEDED by D-026 |
 | D-020 | Description бизнес-обязателен | ACCEPTED |
 | D-021 | Assignee/reporter omitted; assignee остаётся unassigned | ACCEPTED |
 | D-022 | Plugin не выполняет Jira workflow transition | ACCEPTED |
 | D-023 | OpenClaw-only без отдельного application backend | ACCEPTED |
 | D-024 | SQLite driver — встроенный `node:sqlite` закреплённого Node 24 | ACCEPTED |
 | D-025 | Schema v1 использует FR-enums `EDITING` и `PENDING` | ACCEPTED |
+| D-026 | Jira URL/project/type и схема являются configuration-driven/runtime-discovered | ACCEPTED |
+| D-027 | JQL и список читаемых Jira fields задаются deployment config | ACCEPTED |
+| D-028 | Перед create обязателен bounded preview и version-bound confirmation | ACCEPTED |
+| D-029 | Jira text flow реализуется до Catalog/voice/PO notifications | ACCEPTED |
 
 ## 3. Подробные записи
 
@@ -256,27 +260,17 @@
 - STT error не изменяет Jira и не запускает create;
 - fallback на меньшую модель без отдельного решения не допускается как скрытое изменение качества.
 
-### D-018 — Jira платформа и фиксированный scope
+### D-018 — Фиксированный Jira scope
 
-**Статус:** ACCEPTED
-**Решение:** целевая Jira — Server 11.3.8; project FPF id `18100`; issue type Feature id `11500`.
+**Статус:** SUPERSEDED by D-026
 
-**Следствия:** origin не публикуется в публичных docs; server-side config фиксирует его. Пользователь/модель не выбирают project/type.
+Прежнее решение закрепляло конкретные project/type numeric IDs. Они удалены из нормативного контракта: deployment задаёт semantic selectors, а IDs разрешаются при startup/refresh.
 
-### D-019 — Required Jira create fields
+### D-019 — Фиксированный перечень custom fields
 
-**Статус:** ACCEPTED
-**Решение:** обязательны:
+**Статус:** SUPERSEDED by D-026
 
-- `project`;
-- `issuetype`;
-- `summary`;
-- `customfield_16203` Marketing Required;
-- `customfield_13200` Category;
-- `customfield_15204` Moscow;
-- `customfield_14902` Impacted Metrics.
-
-**Следствия:** technical JSON value shapes и allowed options проверяются по production create metadata. Неизвестное required value блокирует READY.
+Прежний перечень конкретных custom-field IDs отменён. Required fields, schemas, defaults и options определяются по актуальной create metadata; semantic answers не хранят Jira IDs как бизнес-контракт.
 
 ### D-020 — Description бизнес-обязателен
 
@@ -331,6 +325,31 @@
 - успешный unique insert операции в `PENDING` является atomic claim; факт начала сети отражается переходом в `POSTING` и `network_started_at`;
 - migration contract tests отклоняют `DRAFTING` и `CLAIMED`;
 - изменение этих enum после публикации schema v1 требует новой migration и versioned contract review.
+
+
+### D-026 — Configuration-driven Jira scope и dynamic metadata
+
+**Статус:** ACCEPTED
+**Решение:** deployment config задаёт `jira.url`, `projectKey` и `issueTypeName`. Numeric project, issue-type, field и option IDs не закрепляются в production code/config/docs. При старте и refresh plugin разрешает semantic selectors в актуальные runtime IDs и получает create metadata/defaults/options/permissions.
+
+**Следствия:** Jira drift обновляет runtime snapshot; unsupported required field блокирует только create. Credential остаётся runtime secret. D-018/D-019 superseded в части fixed IDs/fields.
+
+### D-027 — Configured JQL и configured search fields
+
+**Статус:** ACCEPTED
+**Решение:** exact JQL, список разрешённых issue fields и bounds задаются deployment config. Model/user input не может менять URL, project/type, JQL или field list. Search context формируется только из configured fields после применения limits. Catalog narrowing не является blocker первой Jira MVP integration.
+
+### D-028 — Preview и подтверждение create
+
+**Статус:** ACCEPTED
+**Решение:** перед Jira POST пользователь получает bounded preview и подтверждает exact Draft version + metadata/payload hash. Любое изменение инвалидирует confirmation.
+
+**Следствия:** D-001—D-003 superseded. Idempotency/UNKNOWN остаются обязательными и confirmation не позволяет повторить неоднозначный POST.
+
+### D-029 — Порядок интеграции
+
+**Статус:** ACCEPTED
+**Решение:** следующим vertical stage реализуется Jira discovery → search → bounded context → dedup → dynamic required fields → preview/confirmation → create. Knowledge Catalog, voice и PO notifications подключаются после рабочего text Jira flow и до production go-live. Stage-05A принимается в финальном E2E.
 
 ## 4. Явно отменённые положения исходного ТЗ
 

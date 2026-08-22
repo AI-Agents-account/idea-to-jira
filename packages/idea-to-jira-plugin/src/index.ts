@@ -3,16 +3,23 @@ import { createAuditEvent, hashAuditActorReference, type SqliteAuditWriter } fro
 import { assertCreateDisabled, loadEffectiveConfig } from "./config.js";
 import type { CancelDraftInput, CreateDraftInput, PatchDraftInput } from "./domain/draft.js";
 import { isSafeErrorCode, SafeError } from "./errors/index.js";
-import { DisabledJiraIssueClient } from "./jira/client.js";
 import { createCorrelationContext, StructuredLogger } from "./observability/index.js";
 import {
   assertPayloadWithinLimit,
   requireRateLimit,
 } from "./runtime/policy.js";
 import { CONVERSATION_ROLE_REPLIES } from "./runtime/conversation-role-gate.js";
-import { requesterFromAgentRun, requesterFromToolContext } from "./runtime/requester-context.js";
+import {
+  requesterFromAgentRun,
+  requesterFromBeforeDispatch,
+  requesterFromToolContext,
+  telegramDirectChatId,
+  type TrustedRequesterContext,
+} from "./runtime/requester-context.js";
+import { JiraFailure } from "./jira/types.js";
 import {
   beginServiceRuntime,
+  createDraftToolExecutionRuntimeBoundary,
   createServiceRuntimeCandidate,
   createServiceRuntimeGeneration,
   failServiceRuntime,
@@ -31,6 +38,9 @@ import type {
   PluginHookAgentContext,
   PluginHookBeforeAgentRunEvent,
   PluginHookBeforeAgentRunResult,
+  PluginHookBeforeDispatchContext,
+  PluginHookBeforeDispatchEvent,
+  PluginHookBeforeDispatchResult,
 } from "openclaw/plugin-sdk/types";
 import { Type } from "typebox";
 
@@ -117,10 +127,47 @@ const cancelDraftParameters = Type.Object({
   expectedVersion: Type.Integer({ minimum: 1 }),
 }, { additionalProperties: false });
 const requestAccessParameters = Type.Object({}, { additionalProperties: false });
+const jiraDraftParameters = Type.Object({ draftId: text(128) }, { additionalProperties: false });
+const jiraAnswerParameters = Type.Object({
+  draftId: text(128),
+  questionId: text(128),
+  value: Type.Union([text(10_000), Type.Number(), Type.Array(text(512), { minItems: 1, maxItems: 50, uniqueItems: true })]),
+}, { additionalProperties: false });
+const jiraPreviewParameters = Type.Object({
+  draftId: text(128),
+  explicitProceed: Type.Optional(Type.Boolean()),
+}, { additionalProperties: false });
+const jiraConfirmParameters = Type.Object({
+  draftId: text(128),
+  explicitProceed: Type.Optional(Type.Boolean()),
+}, { additionalProperties: false });
+const jiraCreateParameters = Type.Object({
+  draftId: text(128),
+  confirmationId: text(128),
+  explicitProceed: Type.Optional(Type.Boolean()),
+}, { additionalProperties: false });
 
 function runtimeBuildFingerprint(): string | null {
   const value = process.env.IDEA_TO_JIRA_BUILD_FINGERPRINT?.trim();
   return value && /^[a-f0-9]{64}$/.test(value) ? value : null;
+}
+
+function isActiveCreator(runtime: RuntimeServices, requester: TrustedRequesterContext): boolean {
+  const decision = runtime.accessService.authorizeConversation(requester);
+  return decision.allowed && decision.via === "ACTIVE_CREATOR";
+}
+
+function isConversationAllowed(runtime: RuntimeServices, requester: TrustedRequesterContext): boolean {
+  return runtime.accessService.authorizeConversation(requester).allowed;
+}
+
+function mappedToolError(error: unknown): "JIRA_AUTH_FAILED" | "JIRA_RATE_LIMITED" | "JIRA_SCOPE_INVALID" | "JIRA_UNAVAILABLE" | "JIRA_REQUEST_FAILED" | undefined {
+  if (!(error instanceof JiraFailure)) return undefined;
+  if (error.code === "JIRA_UNAUTHORIZED" || error.code === "JIRA_FORBIDDEN") return "JIRA_AUTH_FAILED";
+  if (error.code === "JIRA_RATE_LIMITED") return "JIRA_RATE_LIMITED";
+  if (error.code === "JIRA_SCOPE_NOT_FOUND") return "JIRA_SCOPE_INVALID";
+  if (["JIRA_DISABLED", "JIRA_CREDENTIAL_MISSING", "JIRA_TIMEOUT", "JIRA_SERVER_ERROR", "JIRA_NETWORK_ERROR", "JIRA_CIRCUIT_OPEN"].includes(error.code)) return "JIRA_UNAVAILABLE";
+  return "JIRA_REQUEST_FAILED";
 }
 
 function persistAudit(
@@ -153,6 +200,16 @@ function persistAudit(
 
 function registerStartupDisabledGate(api: OpenClawPluginApi, code: string): void {
   api.logger.error(`idea-to-jira startup disabled code=${code}`);
+  api.on("before_dispatch", (
+    event: PluginHookBeforeDispatchEvent,
+    context: PluginHookBeforeDispatchContext,
+  ): PluginHookBeforeDispatchResult => {
+    const sessionKey = context.sessionKey ?? event.sessionKey;
+    if (event.channel !== "telegram" || (sessionKey && !sessionKey.startsWith("agent:idea-mvp:"))) {
+      return { handled: false };
+    }
+    return { handled: true, text: CONVERSATION_ROLE_REPLIES.UNAVAILABLE };
+  }, { priority: 1_000 });
   api.on("before_agent_run", (): PluginHookBeforeAgentRunResult => ({
     outcome: "block",
     reason: code,
@@ -163,7 +220,7 @@ function registerStartupDisabledGate(api: OpenClawPluginApi, code: string): void
 
 function logRuntimeDiagnostic(
   api: OpenClawPluginApi,
-  surface: "before_agent_run" | "tool_execute",
+  surface: "before_dispatch" | "before_agent_run" | "tool_execute",
   status: ServiceRuntimeStatus,
 ): void {
   try {
@@ -183,21 +240,45 @@ function logRuntimeDiagnostic(
 const plugin = {
   id: "idea-to-jira",
   name: "Idea-to-Jira MVP",
-  description: "Fail-closed versioned Draft foundation; Jira create remains disabled.",
+  description: "Configuration-driven Draft-to-Jira MVP with bounded search and atomic confirmed create.",
   register(api: OpenClawPluginApi) {
+    const toolDiscovery = api.registrationMode === "tool-discovery";
+    const registrationMode = api.registrationMode ?? "full";
+    const rawBuildFingerprint = process.env.IDEA_TO_JIRA_BUILD_FINGERPRINT;
+    const buildFingerprint = rawBuildFingerprint && /^[a-f0-9]{64}$/.test(rawBuildFingerprint)
+      ? rawBuildFingerprint
+      : rawBuildFingerprint === undefined
+        ? "absent"
+        : "invalid";
+    try {
+      api.logger.info(
+        `idea-to-jira plugin action=load registration_mode=${registrationMode}` +
+        ` build_fingerprint=${buildFingerprint}`,
+      );
+    } catch {
+      // Diagnostics must never affect registration.
+    }
     const loaded = loadEffectiveConfig(api.pluginConfig);
     if (!loaded.ok) {
+      if (toolDiscovery) {
+        api.logger.error(`idea-to-jira tool discovery disabled code=${loaded.code}`);
+        return;
+      }
       registerStartupDisabledGate(api, loaded.code);
       return;
     }
 
     const config = loaded.config;
     assertCreateDisabled(config);
-    const jira = new DisabledJiraIssueClient();
     const logger = new StructuredLogger(api.logger);
-    const runtimeGeneration = createServiceRuntimeGeneration();
+    const draftToolExecutionBoundary = toolDiscovery
+      ? createDraftToolExecutionRuntimeBoundary(config)
+      : undefined;
+
+    const runtimeGeneration = toolDiscovery ? 0 : createServiceRuntimeGeneration();
     let ownedInstanceId: string | undefined;
     let ownedStorage: PluginDatabase | undefined;
+    let ownedJiraWorkflow: RuntimeServices["jiraWorkflow"];
 
     const logLifecycle = (
       eventType: "STORAGE_STARTING" | "STORAGE_READY" | "STORAGE_STARTUP" | "STORAGE_STOPPED",
@@ -220,21 +301,23 @@ const plugin = {
       }
     };
 
-    try {
-      const status = getServiceRuntimeStatus();
-      api.logger.info(
-        `idea-to-jira runtime action=registered` +
-        ` registration_generation=${runtimeGeneration}` +
-        ` phase=${status.phase}` +
-        ` generation=${status.generation}` +
-        ` latest_generation=${status.latestGeneration}` +
-        ` instance=${status.instanceId ? "present" : "absent"}`,
-      );
-    } catch {
-      // Registration diagnostics must not affect service startup.
+    if (!toolDiscovery) {
+      try {
+        const status = getServiceRuntimeStatus();
+        api.logger.info(
+          `idea-to-jira runtime action=registered` +
+          ` registration_generation=${runtimeGeneration}` +
+          ` phase=${status.phase}` +
+          ` generation=${status.generation}` +
+          ` latest_generation=${status.latestGeneration}` +
+          ` instance=${status.instanceId ? "present" : "absent"}`,
+        );
+      } catch {
+        // Registration diagnostics must not affect service startup.
+      }
     }
 
-    api.registerService({
+    if (!toolDiscovery) api.registerService({
       id: "idea-to-jira-storage",
       start() {
         if (!beginServiceRuntime(runtimeGeneration)) {
@@ -249,6 +332,8 @@ const plugin = {
             throw new SafeError("STORAGE_STARTUP_FAILED", false);
           }
           ownedStorage = candidate.storage;
+          ownedJiraWorkflow = candidate.jiraWorkflow;
+          void candidate.jiraWorkflow?.start();
           logLifecycle("STORAGE_READY", "SUCCEEDED");
         } catch (error) {
           failServiceRuntime(runtimeGeneration, "STORAGE_STARTUP_FAILED");
@@ -261,8 +346,11 @@ const plugin = {
       stop() {
         stopServiceRuntime(runtimeGeneration);
         const activeStorage = ownedStorage;
+        const activeJiraWorkflow = ownedJiraWorkflow;
         ownedStorage = undefined;
+        ownedJiraWorkflow = undefined;
         try {
+          activeJiraWorkflow?.stop();
           activeStorage?.close();
           logLifecycle("STORAGE_STOPPED", "SUCCEEDED");
         } catch {
@@ -272,13 +360,14 @@ const plugin = {
       },
     });
 
-    void jira;
-    registerAccessCommands(api, config, () => {
+    if (!toolDiscovery) registerAccessCommands(api, config, () => {
       const runtime = getServiceRuntime();
-      return runtime ? { config: runtime.config, service: runtime.accessService } : undefined;
+      return runtime
+        ? { config: runtime.config, service: runtime.accessService, limiter: runtime.limiter }
+        : undefined;
     }, getServiceRuntimeStatus);
 
-    api.registerGatewayMethod("idea-to-jira.runtime-status", ({ respond }) => {
+    if (!toolDiscovery) api.registerGatewayMethod("idea-to-jira.runtime-status", ({ respond }) => {
       const status = getServiceRuntimeStatus();
       const active = getServiceRuntime();
       respond(true, {
@@ -291,10 +380,76 @@ const plugin = {
         storageHealthy: active?.storage.health.healthy === true,
         storageSchemaVersion: active?.storage.health.schemaVersion ?? null,
         buildFingerprint: runtimeBuildFingerprint(),
+        jiraReadiness: active?.jiraWorkflow?.status().readiness ?? "JIRA_UNAVAILABLE",
+        jiraMetadataHash: active?.jiraWorkflow?.status().metadataHash ?? null,
       });
     }, { scope: "operator.read" });
 
-    api.on("before_agent_run", (
+    if (!toolDiscovery) api.on("before_dispatch", (
+      event: PluginHookBeforeDispatchEvent,
+      context: PluginHookBeforeDispatchContext,
+    ): PluginHookBeforeDispatchResult => {
+      const runtime = getServiceRuntime();
+      if (!runtime) {
+        const requester = requesterFromBeforeDispatch(event, context, config);
+        if (!requester.ok && requester.code === "AGENT_DENIED") return { handled: false };
+        logRuntimeDiagnostic(api, "before_dispatch", getServiceRuntimeStatus());
+        return { handled: true, text: CONVERSATION_ROLE_REPLIES.UNAVAILABLE };
+      }
+      const requester = requesterFromBeforeDispatch(event, context, runtime.config);
+      if (!requester.ok) {
+        // A global dispatch hook must not claim traffic routed to another agent.
+        if (requester.code === "AGENT_DENIED") return { handled: false };
+        persistAudit(
+          runtime.storage,
+          runtime.auditWriter,
+          logger,
+          createAuditEvent({
+            actor: { kind: "SYSTEM" },
+            action: "SECURITY_DECISION",
+            target: { type: "SECURITY_BOUNDARY" },
+            outcome: "REJECTED",
+            code: requester.code,
+            links: createCorrelationContext(),
+            retentionClass: "AUDIT_1Y",
+          }),
+        );
+        return { handled: true, text: CONVERSATION_ROLE_REPLIES.UNAVAILABLE };
+      }
+      let decision;
+      try {
+        decision = runtime.accessService.authorizeConversation(requester.context);
+      } catch {
+        return { handled: true, text: CONVERSATION_ROLE_REPLIES.UNAVAILABLE };
+      }
+      if (decision.allowed) return { handled: false };
+      const message = decision.state === "ROLE_STALE"
+        ? CONVERSATION_ROLE_REPLIES.UNAVAILABLE
+        : CONVERSATION_ROLE_REPLIES[decision.state];
+      const recorded = persistAudit(
+        runtime.storage,
+        runtime.auditWriter,
+        logger,
+        createAuditEvent({
+          actor: {
+            kind: "USER",
+            refHash: hashAuditActorReference(requester.context.accountId, requester.context.senderId),
+          },
+          action: "SECURITY_DECISION",
+          target: { type: "SECURITY_BOUNDARY" },
+          outcome: "REJECTED",
+          code: `CONVERSATION_ROLE_${decision.state}`,
+          links: createCorrelationContext(),
+          retentionClass: "AUDIT_1Y",
+        }),
+      );
+      return {
+        handled: true,
+        text: recorded ? message : CONVERSATION_ROLE_REPLIES.UNAVAILABLE,
+      };
+    }, { priority: 1_000 });
+
+    if (!toolDiscovery) api.on("before_agent_run", (
       event: PluginHookBeforeAgentRunEvent,
       context: PluginHookAgentContext,
     ): PluginHookBeforeAgentRunResult => {
@@ -384,32 +539,173 @@ const plugin = {
       return { outcome: "pass" };
     }, { priority: 100 });
 
+    type ToolName = (typeof config.allowedTools)[number];
+
+    function contextValueType(value: unknown): "absent" | "string" | "number" | "boolean" | "object" | "array" | "other" {
+      if (value === undefined || value === null) return "absent";
+      if (Array.isArray(value)) return "array";
+      const type = typeof value;
+      if (type === "string") return "string";
+      if (type === "number") return "number";
+      if (type === "boolean") return "boolean";
+      if (type === "object") return "object";
+      return "other";
+    }
+
+    function optionalContextString(value: unknown): string | undefined {
+      return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+    }
+
+    function numericTelegramId(value: string | undefined): value is string {
+      return value !== undefined && /^[1-9][0-9]{0,19}$/.test(value);
+    }
+
+    function draftToolDiscoveryContextCompatible(toolContext: Parameters<typeof requesterFromToolContext>[0]): boolean {
+      if (toolContext.oneShotCliRun === true) return false;
+      const delivery = toolContext.deliveryContext;
+      const agentId = optionalContextString(toolContext.agentId);
+      if (agentId !== undefined && agentId !== config.agentId) return false;
+      const messageChannel = optionalContextString(toolContext.messageChannel);
+      const deliveryChannel = optionalContextString(delivery?.channel);
+      if (messageChannel !== undefined && messageChannel !== config.telegram.channelId) return false;
+      if (deliveryChannel !== undefined && deliveryChannel !== config.telegram.channelId) return false;
+      const agentAccountId = optionalContextString(toolContext.agentAccountId);
+      const deliveryAccountId = optionalContextString(delivery?.accountId);
+      if (agentAccountId !== undefined && agentAccountId !== config.telegram.accountId) return false;
+      if (deliveryAccountId !== undefined && deliveryAccountId !== config.telegram.accountId) return false;
+      if (delivery?.threadId !== undefined && String(delivery.threadId).trim().length > 0) return false;
+      const senderId = optionalContextString(toolContext.requesterSenderId);
+      if (senderId !== undefined && !numericTelegramId(senderId)) return false;
+      const deliveryTarget = optionalContextString(delivery?.to);
+      if (deliveryTarget === undefined) return senderId === undefined;
+      const chatId = telegramDirectChatId(deliveryTarget, config.telegram.channelId);
+      if (!chatId) return false;
+      return senderId === undefined || chatId === senderId;
+    }
+
+    function logToolFactoryDiagnostic(
+      toolName: ToolName,
+      toolContext: Parameters<typeof requesterFromToolContext>[0],
+      requesterResult: ReturnType<typeof requesterFromToolContext>,
+      result: "schema" | "null",
+      policy: "not_checked" | "allowed" | "denied" | "runtime_absent" | "jira_absent",
+    ): void {
+      const delivery = toolContext.deliveryContext;
+      const shape = [
+        `agent:${contextValueType(toolContext.agentId)}`,
+        `channel:${contextValueType(toolContext.messageChannel)}`,
+        `account:${contextValueType(toolContext.agentAccountId)}`,
+        `sender:${contextValueType(toolContext.requesterSenderId)}`,
+        `delivery:${contextValueType(delivery)}`,
+        `to:${contextValueType(delivery?.to)}`,
+        `thread:${contextValueType(delivery?.threadId)}`,
+        `one_shot:${contextValueType(toolContext.oneShotCliRun)}`,
+      ].join(",");
+      const requester = requesterResult.ok ? "accepted" : `rejected:${requesterResult.code}`;
+      try {
+        api.logger.info(
+          `idea-to-jira tool action=factory registration_mode=${registrationMode}` +
+          ` tool=${toolName} context_shape=${shape} requester=${requester}` +
+          ` policy=${policy} result=${result}`,
+        );
+      } catch {
+        // Diagnostics must never alter schema discovery.
+      }
+    }
+
+    function logToolExecutionDiagnostic(
+      toolName: ToolName,
+      phase: "start" | "finish",
+      outcome: "started" | "succeeded" | "failed",
+      code?: string,
+    ): void {
+      try {
+        api.logger.info(
+          `idea-to-jira tool action=execute registration_mode=${registrationMode}` +
+          ` tool=${toolName} phase=${phase} outcome=${outcome}` +
+          (code ? ` code=${code}` : ""),
+        );
+      } catch {
+        // Diagnostics must never alter tool execution.
+      }
+    }
+
     async function executeTool<T>(
+      toolName: ToolName,
       toolContext: Parameters<typeof requesterFromToolContext>[0],
       input: unknown,
       action: (
         runtime: RuntimeServices,
         requester: ReturnType<typeof requesterFromToolContext> & { readonly ok: true },
-      ) => T,
+      ) => T | Promise<T>,
     ): Promise<{ content: Array<{ type: "text"; text: string }>; details: T }> {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) {
-        logRuntimeDiagnostic(api, "tool_execute", getServiceRuntimeStatus());
-        throw new SafeError("STORAGE_NOT_READY", false);
-      }
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) throw new SafeError("ACCESS_DENIED", false);
-      const activeStorage = activeRuntime.storage;
+      let lease: ReturnType<NonNullable<typeof draftToolExecutionBoundary>["acquire"]> | undefined;
       try {
-        requireRateLimit(activeRuntime.limiter, requester.context, "draft_tool");
-        assertPayloadWithinLimit(input, activeRuntime.config);
-        assertCreateDisabled(activeRuntime.config);
+        let requester: ReturnType<typeof requesterFromToolContext> & { readonly ok: true } | undefined;
+        const preflight = (policy: Pick<RuntimeServices, "config" | "limiter">): void => {
+          const currentRequester = requesterFromToolContext(toolContext, policy.config);
+          if (!currentRequester.ok) throw new SafeError("ACCESS_DENIED", false);
+          assertPayloadWithinLimit(input, policy.config);
+          assertCreateDisabled(policy.config);
+          requireRateLimit(policy.limiter, currentRequester.context, "draft_tool");
+          requester = currentRequester;
+        };
+
+        logToolExecutionDiagnostic(toolName, "start", "started");
+        let activeRuntime: RuntimeServices | undefined;
+        if (draftToolExecutionBoundary) {
+          try {
+            lease = draftToolExecutionBoundary.acquire(preflight);
+          } catch (error) {
+            if (error instanceof SafeError || error instanceof DraftVersionConflict) throw error;
+            const message = error instanceof Error ? error.message : "";
+            if (isSafeErrorCode(message)) throw error;
+            throw new SafeError("STORAGE_NOT_READY", false, { cause: error });
+          }
+          activeRuntime = lease.runtime;
+        } else {
+          activeRuntime = getServiceRuntime();
+          if (activeRuntime) preflight(activeRuntime);
+        }
+        if (!activeRuntime || !requester) {
+          logRuntimeDiagnostic(api, "tool_execute", getServiceRuntimeStatus());
+          throw new SafeError("STORAGE_NOT_READY", false);
+        }
+        const activeStorage = activeRuntime.storage;
         const trace = createCorrelationContext();
+        const actor = {
+          kind: "USER" as const,
+          refHash: hashAuditActorReference(requester.context.accountId, requester.context.senderId),
+        };
+        let roleDecision;
+        try {
+          roleDecision = activeRuntime.accessService.authorizeConversation(requester.context);
+        } catch {
+          const recorded = persistAudit(activeStorage, activeRuntime.auditWriter, logger, createAuditEvent({
+            actor,
+            action: "SECURITY_DECISION",
+            target: { type: "SECURITY_BOUNDARY" },
+            outcome: "REJECTED",
+            code: "ACCESS_REQUEST_CONFLICT",
+            links: trace,
+            retentionClass: "AUDIT_1Y",
+          }));
+          throw new SafeError(recorded ? "ACCESS_DENIED" : "AUDIT_REQUIRED", false);
+        }
+        if (!roleDecision.allowed) {
+          const recorded = persistAudit(activeStorage, activeRuntime.auditWriter, logger, createAuditEvent({
+            actor,
+            action: "SECURITY_DECISION",
+            target: { type: "SECURITY_BOUNDARY" },
+            outcome: "REJECTED",
+            code: `CONVERSATION_ROLE_${roleDecision.state}`,
+            links: trace,
+            retentionClass: "AUDIT_1Y",
+          }));
+          throw new SafeError(recorded ? "ACCESS_DENIED" : "AUDIT_REQUIRED", false);
+        }
         if (!persistAudit(activeStorage, activeRuntime.auditWriter, logger, createAuditEvent({
-          actor: {
-            kind: "USER",
-            refHash: hashAuditActorReference(requester.context.accountId, requester.context.senderId),
-          },
+          actor,
           action: "SECURITY_DECISION",
           target: { type: "SECURITY_BOUNDARY" },
           outcome: "ALLOWED",
@@ -417,89 +713,224 @@ const plugin = {
           links: trace,
           retentionClass: "AUDIT_1Y",
         }))) throw new SafeError("AUDIT_REQUIRED", false);
-        const result = action(activeRuntime, requester);
+        const result = await action(activeRuntime, requester);
+        logToolExecutionDiagnostic(toolName, "finish", "succeeded");
         return {
           content: [{ type: "text", text: JSON.stringify(result) }],
           details: result,
         };
       } catch (error) {
-        if (error instanceof DraftVersionConflict || error instanceof SafeError) throw error;
-        const code = error instanceof Error && isSafeErrorCode(error.message) ? error.message : "DRAFT_INVALID";
+        if (error instanceof DraftVersionConflict) {
+          logToolExecutionDiagnostic(toolName, "finish", "failed", "DRAFT_VERSION_CONFLICT");
+          throw error;
+        }
+        if (error instanceof SafeError) {
+          logToolExecutionDiagnostic(toolName, "finish", "failed", error.code);
+          throw error;
+        }
+        const mapped = mappedToolError(error);
+        const message = error instanceof Error ? error.message : "";
+        const code = mapped ?? (isSafeErrorCode(message) ? message : message === "JIRA_ANSWER_FIELD_NOT_ALLOWED" ? "JIRA_REQUIRED_ANSWER_INVALID" : "DRAFT_INVALID");
+        logToolExecutionDiagnostic(toolName, "finish", "failed", code);
         throw new SafeError(code, code === "RATE_LIMITED", { cause: error });
+      } finally {
+        try {
+          lease?.release();
+        } catch {
+          // The domain operation may already be committed. Never replace its
+          // truthful result with a close error that could trigger a duplicate retry.
+          try {
+            api.logger.error("idea-to-jira tool runtime release failed code=STORAGE_CLOSE_FAILED");
+          } catch {
+            // Bounded cleanup diagnostics must not alter the tool result.
+          }
+        }
       }
     }
 
-    api.registerTool((toolContext) => {
+    function registerForRequester(
+      toolName: ToolName,
+      toolContext: Parameters<typeof requesterFromToolContext>[0],
+      options: {
+        readonly activeCreator?: boolean;
+        readonly draftToolDiscovery?: boolean;
+        readonly jira?: boolean;
+      } = {},
+    ): boolean {
+      // Discovery must be schema-only: no database, migrations, Jira clients,
+      // RBAC lookup, or timers. The returned tool revalidates this host-derived
+      // context and current RBAC at execution time before any domain action.
+      if (toolDiscovery) {
+        const requester = requesterFromToolContext(toolContext, config);
+        // OpenClaw's catalog path invokes factories with only
+        // config/workspace/agent metadata. Identity is unavailable there, so
+        // schema visibility cannot depend on requester validation. Execution
+        // still requires and revalidates the complete trusted context.
+        const allowed = options.draftToolDiscovery === true && (requester.ok || draftToolDiscoveryContextCompatible(toolContext));
+        logToolFactoryDiagnostic(toolName, toolContext, requester, allowed ? "schema" : "null", "not_checked");
+        return allowed;
+      }
       const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) return null;
+      const requester = requesterFromToolContext(toolContext, activeRuntime?.config ?? config);
+      if (!activeRuntime) {
+        logToolFactoryDiagnostic(toolName, toolContext, requester, "null", "runtime_absent");
+        return false;
+      }
+      if (options.jira === true && !activeRuntime.jiraWorkflow) {
+        logToolFactoryDiagnostic(toolName, toolContext, requester, "null", "jira_absent");
+        return false;
+      }
+      if (!requester.ok) {
+        logToolFactoryDiagnostic(toolName, toolContext, requester, "null", "not_checked");
+        return false;
+      }
+      const allowed = options.activeCreator === true
+        ? isActiveCreator(activeRuntime, requester.context)
+        : isConversationAllowed(activeRuntime, requester.context);
+      logToolFactoryDiagnostic(toolName, toolContext, requester, allowed ? "schema" : "null", allowed ? "allowed" : "denied");
+      return allowed;
+    }
+
+    api.registerTool((toolContext) => {
+      if (!registerForRequester("idea_to_jira_create_draft", toolContext, { draftToolDiscovery: true })) return null;
       return {
         name: "idea_to_jira_create_draft",
         label: "Create own Draft",
         description: "Create a versioned Draft owned by the current Telegram sender; never writes to Jira.",
         parameters: createDraftParameters,
-        execute: async (_id: string, input: unknown) => executeTool(toolContext, input, (runtime, currentRequester) =>
+        execute: async (_id: string, input: unknown) => executeTool("idea_to_jira_create_draft", toolContext, input, (runtime, currentRequester) =>
           runtime.draftService.createDraft(currentRequester.context, input as CreateDraftInput)),
       };
     }, { name: "idea_to_jira_create_draft" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) return null;
+      if (!registerForRequester("idea_to_jira_read_draft", toolContext, { draftToolDiscovery: true })) return null;
       return {
         name: "idea_to_jira_read_draft",
         label: "Read own Draft",
         description: "Read the current immutable version of a Draft owned by the current Telegram sender.",
         parameters: readDraftParameters,
-        execute: async (_id: string, input: unknown) => executeTool(toolContext, input, (runtime, currentRequester) =>
+        execute: async (_id: string, input: unknown) => executeTool("idea_to_jira_read_draft", toolContext, input, (runtime, currentRequester) =>
           runtime.draftService.readDraft(currentRequester.context, (input as { draftId: string }).draftId)),
       };
     }, { name: "idea_to_jira_read_draft" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) return null;
+      if (!registerForRequester("idea_to_jira_patch_draft", toolContext, { draftToolDiscovery: true })) return null;
       return {
         name: "idea_to_jira_patch_draft",
         label: "Patch own Draft",
         description: "CAS patch domain fields of an owned Draft; arbitrary Jira fields are rejected.",
         parameters: patchDraftParameters,
-        execute: async (_id: string, input: unknown) => executeTool(toolContext, input, (runtime, currentRequester) =>
+        execute: async (_id: string, input: unknown) => executeTool("idea_to_jira_patch_draft", toolContext, input, (runtime, currentRequester) =>
           runtime.draftService.patchDraft(currentRequester.context, input as PatchDraftInput)),
       };
     }, { name: "idea_to_jira_patch_draft" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) return null;
+      if (!registerForRequester("idea_to_jira_cancel_draft", toolContext, { draftToolDiscovery: true })) return null;
       return {
         name: "idea_to_jira_cancel_draft",
         label: "Cancel own Draft",
         description: "Cancel an owned Draft with CAS while preserving its immutable versions and audit.",
         parameters: cancelDraftParameters,
-        execute: async (_id: string, input: unknown) => executeTool(toolContext, input, (runtime, currentRequester) =>
+        execute: async (_id: string, input: unknown) => executeTool("idea_to_jira_cancel_draft", toolContext, input, (runtime, currentRequester) =>
           runtime.draftService.cancelDraft(currentRequester.context, input as CancelDraftInput)),
       };
     }, { name: "idea_to_jira_cancel_draft" });
 
     api.registerTool((toolContext) => {
-      const activeRuntime = getServiceRuntime();
-      if (!activeRuntime) return null;
-      const requester = requesterFromToolContext(toolContext, activeRuntime.config);
-      if (!requester.ok) return null;
+      if (!registerForRequester("idea_to_jira_search_duplicates", toolContext, { activeCreator: true, jira: true })) return null;
+      return {
+        name: "idea_to_jira_search_duplicates",
+        label: "Search configured Jira scope",
+        description: "Search only the deployment-configured JQL/fields and produce a version-bound duplicate decision.",
+        parameters: jiraDraftParameters,
+        execute: async (_id: string, input: unknown) => executeTool("idea_to_jira_search_duplicates", toolContext, input, async (runtime, currentRequester) => {
+          if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          const draft = runtime.draftService.readDraft(currentRequester.context, (input as { draftId: string }).draftId).draft;
+          return runtime.jiraWorkflow.searchDuplicates(draft);
+        }),
+      };
+    }, { name: "idea_to_jira_search_duplicates" });
+
+    api.registerTool((toolContext) => {
+      if (!registerForRequester("idea_to_jira_answer_field", toolContext, { activeCreator: true, jira: true })) return null;
+      return {
+        name: "idea_to_jira_answer_field",
+        label: "Answer a discovered Jira field",
+        description: "Store a semantic answer for one current metadata-derived typed question; arbitrary Jira JSON is impossible.",
+        parameters: jiraAnswerParameters,
+        execute: async (_id: string, input: unknown) => executeTool("idea_to_jira_answer_field", toolContext, input, async (runtime, currentRequester) => {
+          const answer = input as { draftId: string; questionId: string; value: string | number | readonly string[] };
+          if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          const draft = runtime.draftService.readDraft(currentRequester.context, answer.draftId).draft;
+          return runtime.jiraWorkflow.answerField(draft, answer.questionId, answer.value);
+        }),
+      };
+    }, { name: "idea_to_jira_answer_field" });
+
+    api.registerTool((toolContext) => {
+      if (!registerForRequester("idea_to_jira_preview_issue", toolContext, { activeCreator: true, jira: true })) return null;
+      return {
+        name: "idea_to_jira_preview_issue",
+        label: "Preview exact Jira issue",
+        description: "Build a bounded preview bound to the current Draft, metadata, duplicate decision, and canonical payload.",
+        parameters: jiraPreviewParameters,
+        execute: async (_id: string, input: unknown) => executeTool("idea_to_jira_preview_issue", toolContext, input, async (runtime, currentRequester) => {
+          const value = input as { draftId: string; explicitProceed?: boolean };
+          if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
+          return runtime.jiraWorkflow.preview(draft, value.explicitProceed === true);
+        }),
+      };
+    }, { name: "idea_to_jira_preview_issue" });
+
+    api.registerTool((toolContext) => {
+      if (!registerForRequester("idea_to_jira_confirm_issue", toolContext, { activeCreator: true, jira: true })) return null;
+      return {
+        name: "idea_to_jira_confirm_issue",
+        label: "Confirm exact Jira preview",
+        description: "Confirm the current preview for the host-derived actor/chat and exact Draft/metadata/payload versions.",
+        parameters: jiraConfirmParameters,
+        execute: async (_id: string, input: unknown) => executeTool("idea_to_jira_confirm_issue", toolContext, input, async (runtime, currentRequester) => {
+          const value = input as { draftId: string; explicitProceed?: boolean };
+          if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
+          return runtime.jiraWorkflow.confirm(draft, currentRequester.context.senderId, currentRequester.context.chatId, value.explicitProceed === true);
+        }),
+      };
+    }, { name: "idea_to_jira_confirm_issue" });
+
+    api.registerTool((toolContext) => {
+      if (!registerForRequester("idea_to_jira_create_issue", toolContext, { activeCreator: true, jira: true })) return null;
+      return {
+        name: "idea_to_jira_create_issue",
+        label: "Create confirmed Jira issue",
+        description: "Execute the one fixed Jira create endpoint through the atomic idempotent operation boundary.",
+        parameters: jiraCreateParameters,
+        execute: async (_id: string, input: unknown) => executeTool("idea_to_jira_create_issue", toolContext, input, async (runtime, currentRequester) => {
+          const value = input as { draftId: string; confirmationId: string; explicitProceed?: boolean };
+          if (!runtime.jiraWorkflow) throw new SafeError("JIRA_REQUEST_FAILED", true);
+          if (!isActiveCreator(runtime, currentRequester.context)) throw new SafeError("ACCESS_DENIED", false);
+          const draft = runtime.draftService.readDraft(currentRequester.context, value.draftId).draft;
+          return runtime.jiraWorkflow.create(draft, currentRequester.context.senderId, currentRequester.context.chatId, value.confirmationId, value.explicitProceed === true);
+        }),
+      };
+    }, { name: "idea_to_jira_create_issue" });
+
+    api.registerTool((toolContext) => {
+      if (!registerForRequester("idea_to_jira_request_access", toolContext)) return null;
       return {
         name: "idea_to_jira_request_access",
         label: "Request Creator access",
         description: "Create or read the current sender's bounded Creator access request.",
         parameters: requestAccessParameters,
-        execute: async (_id: string, input: unknown) => executeTool(toolContext, input, (runtime, currentRequester) =>
+        execute: async (_id: string, input: unknown) => executeTool("idea_to_jira_request_access", toolContext, input, (runtime, currentRequester) =>
           runtime.accessService.requestAccess(currentRequester.context)),
       };
     }, { name: "idea_to_jira_request_access" });

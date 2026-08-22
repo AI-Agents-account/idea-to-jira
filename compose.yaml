@@ -16,6 +16,7 @@ x-openclaw-common: &openclaw-common
     TELEGRAM_PILOT_SENDER_ID: ${TELEGRAM_PILOT_SENDER_ID:?set TELEGRAM_PILOT_SENDER_ID in .env}
     OPENAI_MODEL: ${OPENAI_MODEL:?set OPENAI_MODEL in .env}
     JIRA_BASE_URL: ${JIRA_BASE_URL:?set JIRA_BASE_URL in .env}
+    JIRA_TOKEN_FILE: /run/secrets/jira-token
     BUSINESS_ADMIN_TELEGRAM_IDS: ${BUSINESS_ADMIN_TELEGRAM_IDS:?set BUSINESS_ADMIN_TELEGRAM_IDS in .env}
     PRODUCT_OWNER_TELEGRAM_IDS: ${PRODUCT_OWNER_TELEGRAM_IDS:?set PRODUCT_OWNER_TELEGRAM_IDS in .env}
   volumes:
@@ -24,6 +25,7 @@ x-openclaw-common: &openclaw-common
     - ${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-./data/auth-profile-secrets}:/home/node/.config/openclaw
     - ./data/workspace:/home/node/workspace
     - ./data/plugin-state:/home/node/plugin-state
+    - ./data/secrets:/run/secrets:ro
     - ./knowledge:/app/knowledge:ro
   read_only: true
   tmpfs:

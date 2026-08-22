@@ -12,6 +12,11 @@ const expectedTools = [
   "idea_to_jira_read_draft",
   "idea_to_jira_patch_draft",
   "idea_to_jira_cancel_draft",
+  "idea_to_jira_search_duplicates",
+  "idea_to_jira_answer_field",
+  "idea_to_jira_preview_issue",
+  "idea_to_jira_confirm_issue",
+  "idea_to_jira_create_issue",
   "idea_to_jira_request_access",
 ];
 
@@ -45,13 +50,29 @@ try {
   if (
     telegram?.defaultAccount !== "default" ||
     !exactList(accountIds, ["default"]) ||
-    telegram.dmPolicy !== "allowlist" ||
-    !exactList(telegram.allowFrom, [pilotSenderId]) ||
+    telegram.dmPolicy !== "open" ||
+    !exactList(telegram.allowFrom, ["*"]) ||
+    telegram.groupPolicy !== "disabled" ||
     account?.enabled !== true ||
-    account.dmPolicy !== "allowlist" ||
-    !exactList(account.allowFrom, [pilotSenderId]) ||
+    account.dmPolicy !== "open" ||
+    !exactList(account.allowFrom, ["*"]) ||
     account.groupPolicy !== "disabled"
   ) stop("TELEGRAM_BOUNDARY_INVALID");
+
+  const commands = host.commands;
+  if (
+    commands?.native !== false ||
+    commands.nativeSkills !== false ||
+    commands.text !== false ||
+    commands.bash !== false ||
+    commands.config !== false ||
+    commands.mcp !== false ||
+    commands.plugins !== false ||
+    commands.debug !== false ||
+    commands.restart !== false ||
+    !exactList(commands.allowFrom?.telegram, [pilotSenderId]) ||
+    !exactList(commands.ownerAllowFrom, [`telegram:${pilotSenderId}`])
+  ) stop("COMMAND_BOUNDARY_INVALID");
 
   const agent = host.agents?.list?.find((candidate) => candidate.id === "idea-mvp");
   if (
@@ -79,7 +100,7 @@ try {
     return readFileSync(resolve(process.cwd(), "knowledge/catalog.md"), "utf8");
   });
   if (!loaded.ok) stop(loaded.code);
-  if (loaded.config.telegram.pilotSenderId !== pilotSenderId) stop("PILOT_ACTOR_DRIFT");
+  if (!loaded.config.telegram.adminSenderIds.includes(pilotSenderId)) stop("PILOT_ACTOR_DRIFT");
   assertCreateDisabled(loaded.config);
 
   let jiraDisabled = false;

@@ -1,5 +1,7 @@
 # 09. Bounded duplicate search и решение Creator
 
+> Обновление 2026-08-21: этот документ — supporting contract внутри [Stage-08 Jira MVP integration](08-jira-metadata-whitelist-mapper.md). При конфликте применяются Stage-08, `docs/JIRA_CREATE_CONTRACT.md` v2 и D-026—D-029; fixed Jira IDs/Catalog-first dependency не применяются.
+
 ## Цель и пользовательская ценность
 
 Предупредить очевидные дубли, показав активному Creator только минимально необходимые кандидаты в фиксированном Jira scope. Guest не видит Jira details, ошибка поиска не трактуется как отсутствие дублей, а решение связано с точной версией Draft/Catalog.

@@ -1,7 +1,7 @@
 {
   "id": "idea-to-jira",
   "name": "Idea-to-Jira MVP",
-  "description": "Fail-closed runtime, configuration, and security foundation for the Idea-to-Jira workflow.",
+  "description": "Configuration-driven, metadata-discovered Draft-to-Jira MVP workflow.",
   "version": "0.1.0",
   "contracts": {
     "tools": [
@@ -9,6 +9,11 @@
       "idea_to_jira_read_draft",
       "idea_to_jira_patch_draft",
       "idea_to_jira_cancel_draft",
+      "idea_to_jira_search_duplicates",
+      "idea_to_jira_answer_field",
+      "idea_to_jira_preview_issue",
+      "idea_to_jira_confirm_issue",
+      "idea_to_jira_create_issue",
       "idea_to_jira_request_access"
     ]
   },
@@ -28,93 +33,269 @@
       "stateDir"
     ],
     "properties": {
-      "agentId": { "const": "idea-mvp" },
+      "agentId": {
+        "const": "idea-mvp"
+      },
       "telegram": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["channelId", "accountId", "pilotSenderIdEnv", "adminSenderIdsEnv"],
+        "required": [
+          "channelId",
+          "accountId",
+          "adminSenderIdsEnv"
+        ],
         "properties": {
-          "channelId": { "const": "telegram" },
-          "accountId": { "const": "default" },
-          "pilotSenderIdEnv": { "const": "TELEGRAM_PILOT_SENDER_ID" },
-          "adminSenderIdsEnv": { "const": "BUSINESS_ADMIN_TELEGRAM_IDS" }
+          "channelId": {
+            "const": "telegram"
+          },
+          "accountId": {
+            "const": "default"
+          },
+          "adminSenderIdsEnv": {
+            "const": "BUSINESS_ADMIN_TELEGRAM_IDS"
+          }
         }
       },
       "notifications": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["productOwnerSenderIdsEnv"],
+        "required": [
+          "productOwnerSenderIdsEnv"
+        ],
         "properties": {
-          "productOwnerSenderIdsEnv": { "const": "PRODUCT_OWNER_TELEGRAM_IDS" }
+          "productOwnerSenderIdsEnv": {
+            "const": "PRODUCT_OWNER_TELEGRAM_IDS"
+          }
         }
       },
       "jira": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "originEnv",
-          "tokenEnv",
+          "enabled",
+          "url",
           "projectKey",
-          "projectId",
           "issueTypeName",
-          "issueTypeId",
-          "writeMode"
+          "search",
+          "metadata",
+          "create"
         ],
         "properties": {
-          "originEnv": { "const": "JIRA_BASE_URL" },
-          "tokenEnv": { "const": "JIRA_TOKEN" },
-          "projectKey": { "const": "FPF" },
-          "projectId": { "const": "18100" },
-          "issueTypeName": { "const": "Feature" },
-          "issueTypeId": { "const": "11500" },
-          "writeMode": { "const": "disabled" }
+          "enabled": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://"
+          },
+          "projectKey": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,31}$"
+          },
+          "issueTypeName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "search": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "jql",
+              "fields",
+              "maxResults",
+              "maxPages",
+              "timeoutMs",
+              "maxContextBytes"
+            ],
+            "properties": {
+              "jql": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              },
+              "fields": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^(?!customfield_[1-9][0-9]*$)(?:key|[a-z][a-z0-9_.-]{0,127})$"
+                }
+              },
+              "maxResults": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "maxPages": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 60000
+              },
+              "maxContextBytes": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 1048576
+              }
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "refreshIntervalMinutes"
+            ],
+            "properties": {
+              "refreshIntervalMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080
+              }
+            }
+          },
+          "create": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requireConfirmation"
+            ],
+            "properties": {
+              "requireConfirmation": {
+                "const": true
+              }
+            }
+          }
         }
       },
       "catalog": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "schemaVersion", "sha256"],
+        "required": [
+          "path",
+          "schemaVersion",
+          "sha256"
+        ],
         "properties": {
-          "path": { "type": "string", "minLength": 1 },
-          "schemaVersion": { "const": 1 },
-          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "schemaVersion": {
+            "const": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
         }
       },
-      "sttModel": { "const": "medium" },
+      "sttModel": {
+        "const": "medium"
+      },
       "allowedTools": {
         "type": "array",
-        "minItems": 5,
-        "maxItems": 5,
+        "minItems": 10,
+        "maxItems": 10,
         "prefixItems": [
-          { "const": "idea_to_jira_create_draft" },
-          { "const": "idea_to_jira_read_draft" },
-          { "const": "idea_to_jira_patch_draft" },
-          { "const": "idea_to_jira_cancel_draft" },
-          { "const": "idea_to_jira_request_access" }
+          {
+            "const": "idea_to_jira_create_draft"
+          },
+          {
+            "const": "idea_to_jira_read_draft"
+          },
+          {
+            "const": "idea_to_jira_patch_draft"
+          },
+          {
+            "const": "idea_to_jira_cancel_draft"
+          },
+          {
+            "const": "idea_to_jira_search_duplicates"
+          },
+          {
+            "const": "idea_to_jira_answer_field"
+          },
+          {
+            "const": "idea_to_jira_preview_issue"
+          },
+          {
+            "const": "idea_to_jira_confirm_issue"
+          },
+          {
+            "const": "idea_to_jira_create_issue"
+          },
+          {
+            "const": "idea_to_jira_request_access"
+          }
         ],
         "items": false
       },
       "limits": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["inputTextChars", "requestsPerMinute", "burst", "activeDrafts"],
+        "required": [
+          "inputTextChars",
+          "requestsPerMinute",
+          "burst",
+          "activeDrafts"
+        ],
         "properties": {
-          "inputTextChars": { "type": "integer", "minimum": 1, "maximum": 50000 },
-          "requestsPerMinute": { "type": "integer", "minimum": 1, "maximum": 1000 },
-          "burst": { "type": "integer", "minimum": 1, "maximum": 1000 },
-          "activeDrafts": { "type": "integer", "minimum": 1, "maximum": 100 }
+          "inputTextChars": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50000
+          },
+          "requestsPerMinute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "burst": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "activeDrafts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
         }
       },
       "retention": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["draftDays", "auditDays"],
+        "required": [
+          "draftDays",
+          "auditDays"
+        ],
         "properties": {
-          "draftDays": { "type": "integer", "minimum": 1, "maximum": 3650 },
-          "auditDays": { "type": "integer", "minimum": 1, "maximum": 3650 }
+          "draftDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650
+          },
+          "auditDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650
+          }
         }
       },
-      "stateDir": { "type": "string", "minLength": 1 }
+      "stateDir": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   },
   "uiHints": {
@@ -123,27 +304,21 @@
       "sensitive": true,
       "advanced": true
     },
-    "jira.originEnv": {
-      "label": "Jira origin environment variable",
-      "advanced": true
-    },
-    "jira.tokenEnv": {
-      "label": "Jira credential environment variable",
-      "sensitive": true,
-      "advanced": true
-    },
     "telegram.adminSenderIdsEnv": {
       "label": "Admin sender allowlist environment variable",
       "sensitive": true,
       "advanced": true
     },
-    "telegram.pilotSenderIdEnv": {
-      "label": "Controlled pilot sender environment variable",
-      "sensitive": true,
-      "advanced": true
-    },
     "catalog.sha256": {
       "label": "Approved Catalog SHA-256",
+      "advanced": true
+    },
+    "jira.url": {
+      "label": "Fixed Jira HTTPS origin",
+      "advanced": true
+    },
+    "jira.search.jql": {
+      "label": "Fixed Jira search JQL",
       "advanced": true
     }
   }

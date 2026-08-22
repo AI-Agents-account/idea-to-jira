@@ -23,6 +23,7 @@ test("token bucket is isolated by sender and operation and refills deterministic
   assert.equal(limiter.consume(requester, "draft_tool").allowed, true);
   assert.equal(limiter.consume(requester, "draft_tool").allowed, false);
   assert.equal(limiter.consume(requester, "model_run").allowed, true);
+  assert.equal(limiter.consume(requester, "access_request").allowed, true);
   assert.equal(limiter.consume({ ...requester, senderId: "987654321", chatId: "987654321" }, "draft_tool").allowed, true);
 
   now = 1_000;

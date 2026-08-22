@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { OpenClawPluginToolContext, PluginCommandContext } from "openclaw/plugin-sdk/plugin-entry";
-import type { PluginHookAgentContext, PluginHookBeforeAgentRunEvent } from "openclaw/plugin-sdk/types";
+import type {
+  PluginHookAgentContext,
+  PluginHookBeforeAgentRunEvent,
+  PluginHookBeforeDispatchContext,
+  PluginHookBeforeDispatchEvent,
+} from "openclaw/plugin-sdk/types";
 
 import {
   requesterFromAgentRun,
+  requesterFromBeforeDispatch,
   requesterFromCommandContext,
   requesterFromToolContext,
   validateRequesterFacts,
@@ -22,13 +28,18 @@ const validFacts = {
   chatId: "123456789",
 };
 
-test("accepts only a host-derived Telegram DM context", () => {
+test("accepts any numeric host-derived Telegram private-DM context", () => {
   const result = validateRequesterFacts(validFacts, config);
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.context.senderId, "123456789");
     assert.equal(Object.isFrozen(result.context), true);
   }
+  assert.equal(validateRequesterFacts({
+    ...validFacts,
+    senderId: "987654321",
+    chatId: "987654321",
+  }, config).ok, true);
 });
 
 test("denies missing or ambiguous sender and non-DM destinations", () => {
@@ -40,10 +51,6 @@ test("denies missing or ambiguous sender and non-DM destinations", () => {
   assert.deepEqual(validateRequesterFacts({ ...validFacts, senderId: "telegram:123456789" }, config), {
     ok: false,
     code: "SENDER_MISSING",
-  });
-  assert.deepEqual(validateRequesterFacts({ ...validFacts, senderId: "987654321", chatId: "987654321" }, config), {
-    ok: false,
-    code: "SENDER_DENIED",
   });
   assert.deepEqual(validateRequesterFacts({ ...validFacts, chatId: "-100123456789" }, config), {
     ok: false,
@@ -74,13 +81,36 @@ test("extracts identity from trusted tool factory context, never tool arguments"
     messageChannel: "telegram",
     agentAccountId: "default",
     requesterSenderId: "123456789",
-    deliveryContext: { channel: "telegram", accountId: "default", to: "123456789" },
+    deliveryContext: { channel: "telegram", accountId: "default", to: "telegram:123456789" },
   } as OpenClawPluginToolContext;
   assert.equal(requesterFromToolContext(context, config).ok, true);
+  assert.equal(requesterFromToolContext({
+    ...context,
+    deliveryContext: { ...context.deliveryContext, to: "123456789" },
+  }, config).ok, true, "legacy plain-id routes remain accepted");
   assert.deepEqual(requesterFromToolContext({ ...context, oneShotCliRun: true }, config), {
     ok: false,
     code: "TRIGGER_DENIED",
   });
+
+  const denied = [
+    [{ ...context, agentId: "main" }, "AGENT_DENIED"],
+    [{ ...context, messageChannel: "discord" }, "CHANNEL_DENIED"],
+    [{ ...context, deliveryContext: { ...context.deliveryContext, channel: "discord" } }, "CHANNEL_DENIED"],
+    [{ ...context, agentAccountId: "other" }, "ACCOUNT_DENIED"],
+    [{ ...context, deliveryContext: { ...context.deliveryContext, accountId: "other" } }, "ACCOUNT_DENIED"],
+    [{ ...context, requesterSenderId: undefined }, "SENDER_MISSING"],
+    [{ ...context, deliveryContext: { ...context.deliveryContext, to: "telegram:987654321" } }, "DESTINATION_DENIED"],
+    [{ ...context, deliveryContext: { ...context.deliveryContext, to: "discord:123456789" } }, "DESTINATION_DENIED"],
+    [{ ...context, deliveryContext: { ...context.deliveryContext, to: "telegram:123456789:topic:7" } }, "DESTINATION_DENIED"],
+    [{ ...context, deliveryContext: { ...context.deliveryContext, threadId: 7 } }, "THREAD_DENIED"],
+  ] as const;
+  for (const [candidate, code] of denied) {
+    assert.deepEqual(requesterFromToolContext(candidate as OpenClawPluginToolContext, config), {
+      ok: false,
+      code,
+    });
+  }
 });
 
 test("native Telegram command adapter binds channel-qualified From/To to the trusted sender", () => {
@@ -114,11 +144,44 @@ test("before_agent_run adapter requires a direct user trigger", () => {
     agentId: "idea-mvp",
     trigger: "user",
     messageProvider: "telegram",
-    chatId: "123456789",
+    chatId: "telegram:123456789",
   } satisfies PluginHookAgentContext;
   assert.equal(requesterFromAgentRun(event, context, config).ok, true);
+  assert.equal(requesterFromAgentRun(event, { ...context, chatId: "123456789" }, config).ok, true);
   assert.deepEqual(requesterFromAgentRun(event, { ...context, trigger: "heartbeat" }, config), {
     ok: false,
     code: "TRIGGER_DENIED",
+  });
+});
+
+
+test("before_dispatch adapter binds the routed agent and private-DM destination", () => {
+  const event = {
+    content: "untrusted prompt",
+    channel: "telegram",
+    sessionKey: "agent:idea-mvp:telegram:direct:123456789",
+    senderId: "123456789",
+    isGroup: false,
+  } satisfies PluginHookBeforeDispatchEvent;
+  const context = {
+    channelId: "telegram",
+    accountId: "default",
+    conversationId: "telegram:123456789",
+    sessionKey: event.sessionKey,
+    senderId: "123456789",
+  } satisfies PluginHookBeforeDispatchContext;
+  assert.equal(requesterFromBeforeDispatch(event, context, config).ok, true);
+  assert.equal(requesterFromBeforeDispatch(event, { ...context, conversationId: "123456789" }, config).ok, true);
+  assert.deepEqual(requesterFromBeforeDispatch({ ...event, isGroup: true }, context, config), {
+    ok: false,
+    code: "THREAD_DENIED",
+  });
+  assert.deepEqual(requesterFromBeforeDispatch(
+    { ...event, sessionKey: "agent:main:telegram:direct:123456789" },
+    { ...context, sessionKey: "agent:main:telegram:direct:123456789" },
+    config,
+  ), {
+    ok: false,
+    code: "AGENT_DENIED",
   });
 });
